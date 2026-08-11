@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "manual-safe-account",
+      "adapter": "manual",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "replace-with-catalog-account-id",
+      "auth": {"mode": "manual"},
+      "usage_monitor": {
+        "enabled": false,
+        "adapter": "command_json",
+        "command": ["provider-cli", "usage", "--json"],
+        "poll_interval_seconds": 300,
+        "timeout_seconds": 15
+      },
+      "instructions": "Open the provider, verify the live free quota and hard stop, then submit the generated handoff."
+    },
+    {
+      "id": "openai-compatible-no-auth",
+      "adapter": "openai_compatible",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "replace-with-catalog-account-id",
+      "base_url": "http://127.0.0.1:8000/",
+      "endpoint": "v1/chat/completions",
+      "auth": {"mode": "none"}
+    },
+    {
+      "id": "openai-compatible-env-key",
+      "adapter": "openai_compatible",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "replace-with-catalog-account-id",
+      "base_url": "https://api.example.com/",
+      "endpoint": "v1/chat/completions",
+      "auth": {"mode": "env", "key_env": "FREE_COMPUTE_API_KEY"}
+    },
+    {
+      "id": "openai-compatible-inline-transient",
+      "adapter": "openai_compatible",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "replace-with-catalog-account-id",
+      "base_url": "https://api.example.com/",
+      "endpoint": "v1/chat/completions",
+      "auth": {"mode": "inline"},
+      "instructions": "Pass the key only as the API request's transient auth.api_key field; it is never saved or returned."
+    },
+    {
+      "id": "codex-exec-setup",
+      "adapter": "codex_exec",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "replace-with-catalog-account-id",
+      "command": ["codex", "exec", "--json"],
+      "auth": {"mode": "none"},
+      "instructions": "Codex receives the portable job JSON on stdin and can perform an explicitly authorized setup or handoff."
+    },
+    {
+      "id": "claude-code-planner",
+      "adapter": "claude_code",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "replace-with-catalog-account-id",
+      "command": [
+        "claude",
+        "-p",
+        "Read the portable job JSON from stdin and return a safe provider plan only.",
+        "--output-format",
+        "json",
+        "--no-session-persistence",
+        "--permission-mode",
+        "plan"
+      ],
+      "auth": {"mode": "none"},
+      "instructions": "Optional V1.5 planner. It uses an already authenticated Claude Code CLI and is disabled unless explicitly configured."
+    },
+    {
+      "id": "openai-usage-monitor-env",
+      "adapter": "manual",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "replace-with-catalog-account-id",
+      "auth": {"mode": "manual"},
+      "usage_monitor": {
+        "enabled": false,
+        "adapter": "http_json",
+        "url": "https://api.example.com/v1/usage",
+        "poll_interval_seconds": 300,
+        "timeout_seconds": 15,
+        "auth": {
+          "mode": "env",
+          "key_env": "FREE_COMPUTE_USAGE_KEY",
+          "header": "Authorization",
+          "prefix": "Bearer "
+        }
+      },
+      "instructions": "The monitor must return the canonical usage snapshot; only the environment variable name is stored."
+    }
+  ]
+}

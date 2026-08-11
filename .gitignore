@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.artifacts/
+
+# Authentication/config overlays stay local. The redacted compute ledger is public.
+data/*.private.json
+*.local.json
+.env
+
+# Orchestrator runtime state must never enter the public repository.
+orchestrator/state/
+
+# Active-work ownership marker is never part of the public repository.
+.working

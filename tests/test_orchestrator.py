@@ -1,0 +1,1449 @@
+import copy
+import hashlib
+import http.client
+import json
+import os
+import sys
+import threading
+import unittest
+from datetime import datetime, timedelta, timezone
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from orchestrator import (
+    MAX_BODY_BYTES,
+    OrchestratorError,
+    OrchestratorState,
+    canonical_json,
+    ledger_summary,
+    make_handler,
+    plan_job,
+    public_profile_summary,
+    serve,
+    validate_job,
+)
+
+
+def fixture_catalog():
+    today = datetime.now().astimezone().date().isoformat()
+    return {
+        "as_of": today,
+        "accounts": [
+            {
+                "id": "safe-account",
+                "provider": "Example GPU",
+                "status": "ready",
+                "acquired_safe": True,
+                "hard_stop": True,
+                "payment_state": "no_payment_method",
+                "paid_fallback_allowed": False,
+                "acquired_usd_value": 32.9,
+                "acquired_h100e_hours": 10,
+                "balance_as_of": today,
+                "usage": {"observed_on": today},
+                "hardware": {
+                    "best_gpu": "NVIDIA H100",
+                    "gpu_models": ["NVIDIA H100"],
+                    "stack": ["CUDA"],
+                    "vram_gb_max": 80,
+                    "gpu_count_max": 1,
+                },
+                "usability": {
+                    "usable_now": True,
+                    "interruptibility": "non_interruptible",
+                    "workload_types": ["python", "training", "inference"],
+                },
+            },
+            {
+                "id": "paid-account",
+                "provider": "Paid Fallback",
+                "status": "blocked_payment",
+                "acquired_safe": False,
+                "hard_stop": False,
+                "payment_state": "card_on_file_paid_fallback",
+                "balance": 100,
+                "balance_unit": "USD",
+                "balance_as_of": today,
+                "hardware": {"vram_gb_max": 192},
+            },
+        ],
+        "offers": [
+            {
+                "id": "safe-offer",
+                "provider": "Example GPU",
+                "account_id": "safe-account",
+                "status": "confirmed_free",
+                "payment_method": "not_required",
+                "hard_stop": True,
+                "interruptibility": "non_interruptible",
+                "hardware": {
+                    "best_gpu": "NVIDIA H100",
+                    "gpu_models": ["NVIDIA H100"],
+                    "stack": ["CUDA"],
+                    "vram_gb_max": 80,
+                    "gpu_count_max": 1,
+                },
+            }
+        ],
+        "storage": [
+            {
+                "id": "safe-storage",
+                "provider": "Example Storage",
+                "status": "confirmed_free",
+                "usable_now": True,
+                "capacity": {"amount": 20, "unit": "GiB", "scope": "one account"},
+                "persistence": "account_persistent",
+                "access": ["s3_compatible_api", "python_sdk"],
+                "compute_locality": "cross_provider_remote",
+                "egress": {"policy": "free_with_limits"},
+                "payment_method": "not_required",
+                "hard_stop": True,
+                "paid_fallback_allowed": False,
+            },
+            {
+                "id": "paid-storage",
+                "provider": "Paid Storage",
+                "status": "blocked_payment",
+                "usable_now": False,
+                "capacity": {"amount": 100, "unit": "GiB", "scope": "one account"},
+                "persistence": "volume_persistent",
+                "access": ["s3_compatible_api"],
+                "payment_method": "required",
+                "hard_stop": False,
+                "paid_fallback_allowed": True,
+            },
+        ],
+        "blockers": [],
+    }
+
+
+def fixture_job():
+    return {
+        "schema_version": 1,
+        "job_id": "job-1",
+        "kind": "python",
+        "argv": ["python", "train.py"],
+        "inputs": [{"path": "src"}],
+        "outputs": ["outputs"],
+        "workload_types": ["python", "training"],
+        "resources": {"gpu_count_min": 1, "vram_gb_min": 24, "interruptibility": "forbidden"},
+    }
+
+
+def command_profile(profile_id="command", monitor=None):
+    profile = {
+        "id": profile_id,
+        "adapter": "command",
+        "enabled": True,
+        "allow_dispatch": True,
+        "account_id": "safe-account",
+        "command": ["provider-command"],
+        "auth": {"mode": "none"},
+    }
+    if monitor is not None:
+        profile["usage_monitor"] = monitor
+    return profile
+
+
+def dispatch_job(key, profile="command"):
+    job = fixture_job()
+    job.update({"mode": "dispatch", "profile": profile, "idempotency_key": key})
+    return job
+
+
+class OrchestratorTests(unittest.TestCase):
+    def test_valid_job_plans_deterministically(self):
+        first = plan_job(fixture_job(), fixture_catalog(), {})
+        second = plan_job(fixture_job(), fixture_catalog(), {})
+        self.assertEqual("planned", first["status"])
+        self.assertEqual("safe-account", first["selected"]["account_id"])
+        self.assertEqual(canonical_json(first), canonical_json(second))
+
+    def test_default_is_plan_only(self):
+        result = plan_job(fixture_job(), fixture_catalog(), {})
+        self.assertEqual("plan", result["mode"])
+        self.assertNotIn("response", result)
+
+    def test_ledger_tracks_cuda_blackwell_and_tpu_without_cross_normalizing(self):
+        catalog = fixture_catalog()
+        summary = ledger_summary(catalog)
+        self.assertEqual(10, summary["compute_families"]["cuda"]["acquired_h100e_hours"])
+        self.assertEqual(0, summary["compute_families"]["blackwell_cuda"]["safe_accounts"])
+        self.assertIsNone(summary["compute_families"]["tpu"]["acquired_h100e_hours"])
+
+    def test_paid_fallback_cannot_be_selected(self):
+        job = fixture_job()
+        job["provider"] = "paid-account"
+        result = plan_job(job, fixture_catalog(), {})
+        self.assertEqual("blocked", result["status"])
+        self.assertIn("payment state is not zero-liability", result["reasons"])
+
+    def test_offer_id_can_select_exact_safe_candidate(self):
+        job = fixture_job()
+        job["provider"] = "safe-offer"
+        result = plan_job(job, fixture_catalog(), {})
+        self.assertEqual("planned", result["status"])
+        self.assertEqual("safe-offer", result["selected"]["offer_id"])
+
+    def test_linked_offer_must_also_be_zero_liability(self):
+        catalog = fixture_catalog()
+        catalog["offers"][0]["status"] = "blocked_payment"
+        catalog["offers"][0]["payment_method"] = "required"
+        result = plan_job(fixture_job(), catalog, {})
+        self.assertEqual("blocked", result["status"])
+        self.assertIn("linked offer is not confirmed_free", result["reasons"])
+        self.assertIn("linked offer may require payment", result["reasons"])
+
+    def test_vram_requirement_is_not_downgraded(self):
+        job = fixture_job()
+        job["resources"]["vram_gb_min"] = 96
+        result = plan_job(job, fixture_catalog(), {})
+        self.assertEqual("blocked", result["status"])
+        self.assertTrue(any("below 96 GB" in reason for reason in result["reasons"]))
+
+    def test_persistent_storage_is_selected_without_changing_compute_units(self):
+        job = fixture_job()
+        job["storage"] = {
+            "required": True,
+            "min_gib": 10,
+            "persistence": "medium_term",
+            "access": ["s3"],
+        }
+        catalog = fixture_catalog()
+        result = plan_job(job, catalog, {})
+        self.assertEqual("planned", result["status"])
+        self.assertEqual("safe-storage", result["selected"]["storage"]["id"])
+        self.assertEqual(10, catalog["accounts"][0]["acquired_h100e_hours"])
+        self.assertNotIn("h100e", canonical_json(result["selected"]["storage"]))
+        self.assertTrue(any("egress" in warning for warning in result["warnings"]))
+
+    def test_storage_capacity_and_payment_are_never_downgraded(self):
+        job = fixture_job()
+        job["storage"] = {
+            "required": True,
+            "min_gib": 30,
+            "persistence": "medium_term",
+            "access": ["s3"],
+        }
+        result = plan_job(job, fixture_catalog(), {})
+        self.assertEqual("blocked", result["status"])
+        self.assertTrue(any("below 30 GiB" in reason for reason in result["reasons"]))
+        job["storage"]["storage_id"] = "paid-storage"
+        result = plan_job(job, fixture_catalog(), {})
+        self.assertEqual("blocked", result["status"])
+        self.assertTrue(any("storage safety" in reason for reason in result["reasons"]))
+
+    def test_cross_provider_storage_requires_zero_cost_egress_and_valid_locality(self):
+        job = fixture_job()
+        job["storage"] = {
+            "required": True,
+            "min_gib": 1,
+            "persistence": "medium_term",
+            "access": ["s3"],
+        }
+        catalog = fixture_catalog()
+        storage = catalog["storage"][0]
+        storage["egress"] = {"policy": "unknown"}
+        blocked = plan_job(job, catalog, {})
+        self.assertEqual("blocked", blocked["status"])
+        self.assertTrue(any("egress" in reason for reason in blocked["reasons"]))
+
+        storage["egress"] = {"policy": "free_with_limits"}
+        storage["compute_locality"] = "same_provider_mounted"
+        storage["provider"] = "Google"
+        storage["account_id"] = "acct-colab"
+        blocked = plan_job(job, catalog, {})
+        self.assertEqual("blocked", blocked["status"])
+        self.assertTrue(any("not attached" in reason for reason in blocked["reasons"]))
+
+        storage["cross_provider_routes"] = [
+            {
+                "compute_provider": "Example GPU",
+                "usable_now": True,
+                "zero_cost_egress_verified": True,
+                "observed_on": datetime.now().astimezone().date().isoformat(),
+            }
+        ]
+        allowed = plan_job(job, catalog, {})
+        self.assertEqual("planned", allowed["status"])
+
+    def test_offer_only_hardware_drives_blackwell_planning_and_arm_warnings(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0]["hardware"] = {}
+        catalog["offers"][0]["hardware"] = {
+            "best_gpu": "NVIDIA B200",
+            "gpu_models": ["NVIDIA B200"],
+            "stack": ["CUDA"],
+            "compute_class": "blackwell",
+            "vram_gb_max": 192,
+            "gpu_count_max": 1,
+        }
+        older = copy.deepcopy(catalog["offers"][0])
+        older["id"] = "older-offer"
+        older["hardware"] = {
+            "best_gpu": "NVIDIA H100",
+            "gpu_models": ["NVIDIA H100"],
+            "stack": ["CUDA"],
+            "vram_gb_max": 80,
+            "gpu_count_max": 1,
+        }
+        catalog["offers"].append(older)
+        job = fixture_job()
+        job["resources"]["blackwell_required"] = True
+        result = plan_job(job, catalog, {})
+        self.assertEqual("planned", result["status"])
+        self.assertTrue(result["selected"]["compute"]["blackwell"])
+        arm = OrchestratorState(catalog, {}).arm({"providers": ["safe-account"]})
+        self.assertTrue(any("mixes Blackwell" in warning for warning in arm["warnings"]))
+
+    def test_blackwell_marker_without_cuda_is_not_blackwell_compute(self):
+        catalog = fixture_catalog()
+        tpu_hardware = {
+            "best_gpu": "Google TPU v5e",
+            "gpu_models": ["Google TPU v5e"],
+            "stack": ["TPU", "JAX"],
+            "compute_class": "blackwell",
+            "unit_count_max": 1,
+            "memory_per_unit_gb_max": 96,
+        }
+        catalog["accounts"][0]["hardware"] = tpu_hardware
+        catalog["offers"][0]["hardware"] = copy.deepcopy(tpu_hardware)
+        job = fixture_job()
+        job["resources"].update(
+            {"compute_backend": "tpu", "blackwell_required": True, "vram_gb_min": 0}
+        )
+        result = plan_job(job, catalog, {})
+        self.assertEqual("blocked", result["status"])
+        self.assertIn("candidate is not verified Blackwell-class CUDA compute", result["reasons"])
+
+    def test_multi_node_and_multi_provider_remain_explicit_phase_two(self):
+        job = fixture_job()
+        job["resources"]["nodes_min"] = 2
+        job["resources"]["gpu_count_min"] = 2
+        job["topology"] = {"allow_multi_provider": True}
+        result = plan_job(job, fixture_catalog(), {})
+        self.assertEqual("blocked", result["status"])
+        self.assertIn("multi-node execution is a Phase 2 capability", result["reasons"])
+        self.assertIn("multi-GPU execution is a Phase 2 capability", result["reasons"])
+        self.assertIn("multi-provider execution is a Phase 2 capability", result["reasons"])
+
+    def test_cuda_blackwell_and_tpu_are_routed_and_armed_separately(self):
+        catalog = fixture_catalog()
+        tpu_account = copy.deepcopy(catalog["accounts"][0])
+        tpu_account.update(
+            {
+                "id": "tpu-account",
+                "provider": "Example TPU",
+                "acquired_h100e_hours": 0,
+                "hardware": {
+                    "best_gpu": "Google TPU v5e",
+                    "gpu_models": ["Google TPU v5e"],
+                    "unit_count_max": 1,
+                    "stack": ["TPU", "JAX"],
+                },
+            }
+        )
+        catalog["accounts"].append(tpu_account)
+        tpu_offer = copy.deepcopy(catalog["offers"][0])
+        tpu_offer.update(
+            {
+                "id": "tpu-offer",
+                "provider": "Example TPU",
+                "account_id": "tpu-account",
+                "hardware": tpu_account["hardware"],
+            }
+        )
+        catalog["offers"].append(tpu_offer)
+
+        job = fixture_job()
+        job["resources"]["compute_backend"] = "tpu"
+        job["resources"]["vram_gb_min"] = 0
+        result = plan_job(job, catalog, {})
+        self.assertEqual("tpu-account", result["selected"]["account_id"])
+        self.assertEqual(["tpu"], result["selected"]["compute"]["backends"])
+        self.assertNotIn("h100e", canonical_json(result["selected"]["compute"]))
+
+        job = fixture_job()
+        job["resources"]["compute_backend"] = "cuda"
+        job["resources"]["blackwell_required"] = True
+        self.assertEqual("blocked", plan_job(job, catalog, {})["status"])
+        catalog["accounts"][0]["hardware"].update(
+            {"best_gpu": "NVIDIA B200", "gpu_models": ["NVIDIA B200"], "compute_class": "blackwell"}
+        )
+        catalog["offers"][0]["hardware"] = copy.deepcopy(catalog["accounts"][0]["hardware"])
+        self.assertTrue(plan_job(job, catalog, {})["selected"]["compute"]["blackwell"])
+
+        arm = OrchestratorState(catalog, {}).arm(
+            {"providers": ["safe-account", "tpu-account"]}
+        )
+        self.assertTrue(any("mixes compute backends" in warning for warning in arm["warnings"]))
+
+    def test_tpu_meter_and_catalog_values_never_enter_h100e(self):
+        catalog = fixture_catalog()
+        tpu_account = copy.deepcopy(catalog["accounts"][0])
+        tpu_account.update(
+            {
+                "id": "tpu-account",
+                "provider": "Example TPU",
+                "acquired_h100e_hours": 999,
+                "hardware": {
+                    "best_gpu": "Google TPU v5e",
+                    "gpu_models": ["Google TPU v5e"],
+                    "stack": ["TPU", "JAX"],
+                    "unit_count_max": 1,
+                },
+            }
+        )
+        catalog["accounts"].append(tpu_account)
+        tpu_offer = copy.deepcopy(catalog["offers"][0])
+        tpu_offer.update(
+            {
+                "id": "tpu-offer",
+                "provider": "Example TPU",
+                "account_id": "tpu-account",
+                "hardware": copy.deepcopy(tpu_account["hardware"]),
+            }
+        )
+        catalog["offers"].append(tpu_offer)
+        summary = ledger_summary(catalog)
+        self.assertEqual(10, summary["acquired_h100e_hours"])
+        self.assertIsNone(summary["compute_families"]["tpu"]["acquired_h100e_hours"])
+
+        profile = {
+            "id": "tpu-monitor",
+            "adapter": "manual",
+            "enabled": False,
+            "allow_dispatch": False,
+            "account_id": "tpu-account",
+            "auth": {"mode": "manual"},
+            "usage_monitor": {
+                "enabled": True,
+                "adapter": "command_json",
+                "command": ["usage-meter"],
+                "poll_interval_seconds": 60,
+            },
+        }
+        state = OrchestratorState(catalog, {"tpu-monitor": profile})
+        state.arm({"providers": ["tpu-account"], "shutdown": {"max_h100e": 1}})
+        meter = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                '{"available_h100e":999,"used_h100e":5,'
+                '"available_tpu_hours":19,"used_tpu_hours":1}'
+            ),
+            stderr="",
+        )
+        with mock.patch("orchestrator.subprocess.run", return_value=meter):
+            state.refresh_usage(["tpu-account"])
+        row = next(
+            item for item in state.usage_view()["accounts"] if item["account_id"] == "tpu-account"
+        )
+        self.assertIsNone(row["available_h100e"])
+        self.assertIsNone(row["used_h100e"])
+        self.assertEqual(19, row["available_tpu_hours"])
+        self.assertEqual(0, state.arm_view()["h100e_used"])
+
+    def test_auto_arm_is_deterministic_and_does_not_launch(self):
+        state = OrchestratorState(fixture_catalog(), {})
+        first = state.auto_arm({"job": fixture_job(), "provider_count": 1})
+        self.assertEqual("planned", first["plan"]["status"])
+        self.assertTrue(first["arm"]["armed"])
+        self.assertEqual(["safe-account"], first["arm"]["providers"])
+        self.assertEqual(0, first["arm"]["jobs_started"])
+
+    def test_usage_monitor_detects_out_of_app_change_and_can_auto_disarm(self):
+        profiles = {
+            "monitored": {
+                "id": "monitored",
+                "adapter": "manual",
+                "enabled": False,
+                "allow_dispatch": False,
+                "account_id": "safe-account",
+                "auth": {"mode": "manual"},
+                "usage_monitor": {
+                    "enabled": True,
+                    "adapter": "command_json",
+                    "command": ["usage", "--json"],
+                    "poll_interval_seconds": 60,
+                },
+            }
+        }
+        state = OrchestratorState(fixture_catalog(), profiles)
+        snapshots = [
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"balance":32.9,"balance_unit":"USD","available_h100e":10,"used_h100e":0}',
+                stderr="",
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"balance":29.61,"balance_unit":"USD","available_h100e":9,"used_h100e":1}',
+                stderr="",
+            ),
+        ]
+        with mock.patch("orchestrator.subprocess.run", side_effect=snapshots):
+            state.refresh_usage()
+            state.refresh_usage()
+        row = state.usage_view()["accounts"][0]
+        self.assertTrue(row["external_activity_detected"])
+        self.assertEqual(-1, row["deltas"]["available_h100e"])
+
+        state.arm(
+            {
+                "providers": ["safe-account"],
+                "shutdown": {"max_errors": 1, "max_jobs": 2},
+            }
+        )
+        failed = SimpleNamespace(returncode=7, stdout="", stderr="failed")
+        with mock.patch("orchestrator.subprocess.run", return_value=failed):
+            state.refresh_usage()
+        self.assertFalse(state.arm_view()["armed"])
+        self.assertEqual("maximum armed errors reached", state.arm_view()["reason"])
+
+    def test_concurrent_identical_usage_polls_apply_the_delta_once(self):
+        monitor = {
+            "enabled": True,
+            "adapter": "command_json",
+            "command": ["usage-meter"],
+            "poll_interval_seconds": 60,
+        }
+        state = OrchestratorState(
+            fixture_catalog(), {"monitored": command_profile("monitored", monitor)}
+        )
+        state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 2}})
+        state.usage["safe-account"] = {
+            "account_id": "safe-account",
+            "profile_id": "monitored",
+            "status": "live",
+            "available_h100e": 10,
+            "used_h100e": 0,
+            "_dispatch_generation": state.dispatch_generation,
+        }
+        rendezvous = threading.Barrier(2)
+        errors = []
+
+        def meter(*args, **kwargs):
+            rendezvous.wait(3)
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"available_h100e":9,"used_h100e":1}',
+                stderr="",
+            )
+
+        def refresh():
+            try:
+                state.refresh_usage(["safe-account"], profile_ids={"monitored"})
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        with mock.patch("orchestrator.subprocess.run", side_effect=meter):
+            threads = [threading.Thread(target=refresh) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(4)
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual([], errors)
+        self.assertEqual(1, state.usage["safe-account"]["used_h100e"])
+        self.assertEqual(1, state.arm_view()["h100e_used"])
+
+    def test_late_usage_poll_cannot_overwrite_a_newer_completed_poll(self):
+        monitor = {
+            "enabled": True,
+            "adapter": "command_json",
+            "command": ["usage-meter"],
+            "poll_interval_seconds": 60,
+        }
+        state = OrchestratorState(
+            fixture_catalog(), {"monitored": command_profile("monitored", monitor)}
+        )
+        state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 2}})
+        state.usage["safe-account"] = {
+            "account_id": "safe-account",
+            "profile_id": "monitored",
+            "status": "live",
+            "available_h100e": 10,
+            "used_h100e": 0,
+            "_dispatch_generation": state.dispatch_generation,
+        }
+        first_started = threading.Event()
+        release_first = threading.Event()
+        call_lock = threading.Lock()
+        call_count = 0
+        errors = []
+
+        def meter(*args, **kwargs):
+            nonlocal call_count
+            with call_lock:
+                call_count += 1
+                current = call_count
+            if current == 1:
+                first_started.set()
+                if not release_first.wait(3):
+                    raise AssertionError("first usage poll was not released")
+                used = 1
+            else:
+                used = 2
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"available_h100e": 10 - used, "used_h100e": used}),
+                stderr="",
+            )
+
+        def refresh():
+            try:
+                state.refresh_usage(["safe-account"], profile_ids={"monitored"})
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        with mock.patch("orchestrator.subprocess.run", side_effect=meter):
+            first = threading.Thread(target=refresh)
+            first.start()
+            self.assertTrue(first_started.wait(2))
+            second = threading.Thread(target=refresh)
+            second.start()
+            second.join(3)
+            second_completed = not second.is_alive()
+            release_first.set()
+            first.join(3)
+        self.assertTrue(second_completed)
+        self.assertFalse(first.is_alive())
+        self.assertEqual([], errors)
+        self.assertEqual(2, state.usage["safe-account"]["used_h100e"])
+        self.assertEqual(2, state.arm_view()["h100e_used"])
+
+    def test_unknown_gpu_count_is_not_treated_as_sufficient(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0]["hardware"].pop("gpu_count_max")
+        catalog["offers"][0]["hardware"].pop("gpu_count_max")
+        result = plan_job(fixture_job(), catalog, {})
+        self.assertEqual("blocked", result["status"])
+        self.assertIn("GPU count is unknown", result["reasons"])
+
+    def test_path_escape_is_rejected(self):
+        job = fixture_job()
+        job["outputs"] = ["../escape"]
+        with self.assertRaisesRegex(OrchestratorError, "cannot escape"):
+            validate_job(job)
+
+    def test_server_refuses_non_loopback_bind(self):
+        with self.assertRaisesRegex(OrchestratorError, "loopback"):
+            serve(OrchestratorState(fixture_catalog(), {}), "0.0.0.0", 8766)
+
+    def test_nonfinite_resources_and_inline_job_secrets_are_rejected(self):
+        job = fixture_job()
+        job["resources"]["vram_gb_min"] = float("nan")
+        with self.assertRaisesRegex(OrchestratorError, "non-finite"):
+            validate_job(job)
+        for key in (
+            "api_key",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "SERVICE_SECRET",
+            "ACCESS_TOKEN",
+            "DB_PASSWORD",
+            "Authorization",
+        ):
+            with self.subTest(key=key):
+                job = fixture_job()
+                job["metadata"] = {"nested": {key: "must-not-be-here"}}
+                with self.assertRaisesRegex(OrchestratorError, "transient auth"):
+                    validate_job(job)
+
+        job = fixture_job()
+        job["metadata"] = {
+            "token_id": "tok-public-id",
+            "secret_id": "secret-public-id",
+            "authorization_id": "auth-public-id",
+            "api_key_id": "key-public-id",
+            "password_policy": "rotate-quarterly",
+        }
+        validated = validate_job(job)
+        self.assertEqual(job["metadata"], validated["metadata"])
+
+    def test_dispatch_requires_enabled_profile_and_is_idempotent(self):
+        job = fixture_job()
+        job.update({"mode": "dispatch", "profile": "manual", "idempotency_key": "same-key"})
+        profiles = {
+            "manual": {
+                "id": "manual",
+                "adapter": "manual",
+                "enabled": True,
+                "allow_dispatch": True,
+                "account_id": "safe-account",
+                "auth": {"mode": "manual"},
+            }
+        }
+        state = OrchestratorState(fixture_catalog(), profiles)
+        state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 2}})
+        first = state.dispatch(job)
+        second = state.dispatch(job)
+        self.assertEqual("manual_handoff", first["status"])
+        self.assertEqual(first, second)
+        changed = copy.deepcopy(job)
+        changed["argv"].append("--changed")
+        with self.assertRaisesRegex(OrchestratorError, "already used"):
+            state.dispatch(changed)
+
+    def test_concurrent_dispatch_reserves_idempotency_and_single_job_slot(self):
+        profiles = {"command": command_profile()}
+        state = OrchestratorState(fixture_catalog(), profiles)
+        state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 1}})
+        started = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def provider_run(*args, **kwargs):
+            calls.append((args, kwargs))
+            started.set()
+            self.assertTrue(release.wait(3))
+            return SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr="")
+
+        first_result = {}
+
+        def first_dispatch():
+            first_result.update(state.dispatch(dispatch_job("race-key")))
+
+        with mock.patch("orchestrator.subprocess.run", side_effect=provider_run):
+            first = threading.Thread(target=first_dispatch)
+            first.start()
+            self.assertTrue(started.wait(2))
+            in_progress = state.dispatch(dispatch_job("race-key"))
+            second_result = {}
+            second = threading.Thread(
+                target=lambda: second_result.update(state.dispatch(dispatch_job("second-key")))
+            )
+            second.start()
+            release.set()
+            first.join(3)
+            second.join(3)
+        self.assertEqual("in_progress", in_progress["status"])
+        self.assertEqual("completed", first_result["status"])
+        self.assertEqual("blocked", second_result["status"])
+        self.assertEqual(1, len(calls))
+        self.assertEqual(1, first_result["arm_after"]["jobs_started"])
+
+    def test_disarm_serializes_with_provider_start_and_blocks_later_calls(self):
+        state = OrchestratorState(fixture_catalog(), {"command": command_profile()})
+        state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 2}})
+        started = threading.Event()
+        release = threading.Event()
+        disarmed = threading.Event()
+
+        def provider_run(*args, **kwargs):
+            started.set()
+            self.assertTrue(release.wait(3))
+            return SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr="")
+
+        with mock.patch("orchestrator.subprocess.run", side_effect=provider_run) as run:
+            worker = threading.Thread(target=lambda: state.dispatch(dispatch_job("active-key")))
+            worker.start()
+            self.assertTrue(started.wait(2))
+            disarmer = threading.Thread(
+                target=lambda: (state.disarm("operator stop"), disarmed.set())
+            )
+            disarmer.start()
+            self.assertFalse(disarmed.wait(0.1))
+            release.set()
+            worker.join(3)
+            disarmer.join(3)
+            later = state.dispatch(dispatch_job("after-stop"))
+        self.assertTrue(disarmed.is_set())
+        self.assertEqual("blocked", later["status"])
+        self.assertEqual(1, run.call_count)
+
+    def test_dispatch_monitor_is_fresh_successful_or_fails_closed(self):
+        monitor = {
+            "enabled": True,
+            "adapter": "command_json",
+            "command": ["usage-meter"],
+            "poll_interval_seconds": 60,
+        }
+        state = OrchestratorState(
+            fixture_catalog(), {"command": command_profile(monitor=monitor)}
+        )
+        state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 2}})
+
+        def unreadable(command, **kwargs):
+            if command[0] == "usage-meter":
+                return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+            self.fail("provider command must not run after an unreadable meter")
+
+        with mock.patch("orchestrator.subprocess.run", side_effect=unreadable) as run:
+            blocked = state.dispatch(dispatch_job("meter-fail"))
+        self.assertEqual("blocked", blocked["status"])
+        self.assertEqual(1, run.call_count)
+
+        state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 2}})
+
+        def successful(command, **kwargs):
+            if command[0] == "usage-meter":
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout='{"balance":32.9,"available_h100e":10,"used_h100e":0}',
+                    stderr="",
+                )
+            return SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr="")
+
+        with mock.patch("orchestrator.subprocess.run", side_effect=successful) as run:
+            completed = state.dispatch(dispatch_job("meter-good"))
+        self.assertEqual("completed", completed["status"])
+        self.assertEqual(2, run.call_count)
+
+    def test_disabled_or_stale_configured_monitor_never_dispatches(self):
+        disabled = {
+            "enabled": False,
+            "adapter": "command_json",
+            "command": ["usage-meter"],
+            "poll_interval_seconds": 60,
+        }
+        state = OrchestratorState(
+            fixture_catalog(), {"command": command_profile(monitor=disabled)}
+        )
+        state.arm({"providers": ["safe-account"]})
+        with mock.patch("orchestrator.subprocess.run") as run:
+            result = state.dispatch(dispatch_job("disabled-meter"))
+        self.assertEqual("blocked", result["status"])
+        run.assert_not_called()
+
+        enabled = {**disabled, "enabled": True}
+        state = OrchestratorState(
+            fixture_catalog(), {"command": command_profile(monitor=enabled)}
+        )
+        state.arm({"providers": ["safe-account"]})
+        state.usage["safe-account"] = {
+            "status": "live",
+            "observed_at": "2000-01-01T00:00:00Z",
+            "balance": 10,
+        }
+        with (
+            mock.patch.object(state, "refresh_usage", return_value=state.usage_view()),
+            mock.patch("orchestrator.subprocess.run") as run,
+        ):
+            result = state.dispatch(dispatch_job("stale-meter"))
+        self.assertEqual("blocked", result["status"])
+        run.assert_not_called()
+
+    def test_unmonitored_dispatch_requires_explicit_profile(self):
+        state = OrchestratorState(fixture_catalog(), {"command": command_profile()})
+        state.arm({"providers": ["safe-account"]})
+        job = dispatch_job("implicit-profile")
+        job.pop("profile")
+        with mock.patch("orchestrator.subprocess.run") as run:
+            result = state.dispatch(job)
+        self.assertEqual("manual_handoff", result["status"])
+        run.assert_not_called()
+
+    def test_stale_catalog_or_account_blocks_arm_and_dispatch(self):
+        stale = fixture_catalog()
+        yesterday = datetime.now().astimezone().date() - timedelta(days=1)
+        stale["as_of"] = yesterday.isoformat()
+        with self.assertRaisesRegex(OrchestratorError, "stale"):
+            OrchestratorState(stale, {}).arm({"providers": ["safe-account"]})
+
+        catalog = fixture_catalog()
+        state = OrchestratorState(catalog, {"command": command_profile()})
+        state.arm({"providers": ["safe-account"]})
+        catalog["accounts"][0]["balance_as_of"] = yesterday.isoformat()
+        catalog["accounts"][0]["usage"]["observed_on"] = yesterday.isoformat()
+        with mock.patch("orchestrator.subprocess.run") as run:
+            result = state.dispatch(dispatch_job("stale-account"))
+        self.assertEqual("blocked", result["status"])
+        run.assert_not_called()
+
+    def test_profile_binding_constrains_selection(self):
+        catalog = fixture_catalog()
+        second = copy.deepcopy(catalog["accounts"][0])
+        second["id"] = "a-larger-account"
+        second["acquired_h100e_hours"] = 100
+        catalog["accounts"].append(second)
+        offer = copy.deepcopy(catalog["offers"][0])
+        offer["id"] = "a-larger-offer"
+        offer["account_id"] = second["id"]
+        catalog["offers"].append(offer)
+        profiles = {
+            "bound": {
+                "id": "bound",
+                "adapter": "manual",
+                "account_id": "safe-account",
+                "auth": {"mode": "manual"},
+            }
+        }
+        job = fixture_job()
+        job["profile"] = "bound"
+        result = plan_job(job, catalog, profiles)
+        self.assertEqual("safe-account", result["selected"]["account_id"])
+
+    def test_command_adapter_reports_nonzero_exit_as_failed(self):
+        job = fixture_job()
+        job.update({"mode": "dispatch", "profile": "command", "idempotency_key": "failure-key"})
+        profiles = {
+            "command": {
+                "id": "command",
+                "adapter": "command",
+                "enabled": True,
+                "allow_dispatch": True,
+                "account_id": "safe-account",
+                "command": ["fake-command"],
+                "auth": {"mode": "none"},
+            }
+        }
+        completed = SimpleNamespace(returncode=7, stdout="", stderr="failed")
+        with mock.patch("orchestrator.subprocess.run", return_value=completed):
+            state = OrchestratorState(fixture_catalog(), profiles)
+            state.arm({"providers": ["safe-account"]})
+            result = state.dispatch(job)
+        self.assertEqual("failed", result["status"])
+        self.assertEqual(7, result["exit_code"])
+
+    def test_command_output_is_recursive_redacted_and_stderr_is_never_returned(self):
+        state = OrchestratorState(fixture_catalog(), {"command": command_profile()})
+        state.arm({"providers": ["safe-account"]})
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                '{"nested":{"api_key":"visible-secret",'
+                '"AWS_SECRET_ACCESS_KEY":"aws-secret-value",'
+                '"AWS_ACCESS_KEY_ID":"aws-key-id-value",'
+                '"AWS_SESSION_TOKEN":"aws-session-value",'
+                '"SERVICE_SECRET":"service-secret-value",'
+                '"DB_PASSWORD":"database-password-value",'
+                '"Authorization":"Basic authorization-value",'
+                '"token_id":"tok-public-id","secret_id":"secret-public-id",'
+                '"authorization_id":"auth-public-id","api_key_id":"key-public-id"},'
+                '"workspace_path":"C:\\\\Users\\\\private\\\\project",'
+                '"message":"Bearer test-secret-value"}'
+            ),
+            stderr="password=stderr-secret C:\\Users\\private\\secret.txt",
+        )
+        with mock.patch("orchestrator.subprocess.run", return_value=completed) as run:
+            result = state.dispatch(dispatch_job("redaction-key"))
+        serialized = canonical_json(result)
+        for forbidden in (
+            "visible-secret",
+            "aws-secret-value",
+            "aws-key-id-value",
+            "aws-session-value",
+            "service-secret-value",
+            "database-password-value",
+            "authorization-value",
+            "private",
+            "stderr-secret",
+            "test-secret-value",
+        ):
+            self.assertNotIn(forbidden, serialized)
+        self.assertEqual("tok-public-id", result["output"]["nested"]["token_id"])
+        self.assertEqual("secret-public-id", result["output"]["nested"]["secret_id"])
+        self.assertEqual("auth-public-id", result["output"]["nested"]["authorization_id"])
+        self.assertEqual("key-public-id", result["output"]["nested"]["api_key_id"])
+        self.assertNotIn("stderr", result)
+        self.assertTrue(result["stderr_present"])
+        self.assertEqual(
+            "redaction-key",
+            run.call_args.kwargs["env"]["FREE_COMPUTE_IDEMPOTENCY_KEY"],
+        )
+
+    def test_runtime_tombstone_blocks_restart_retry_without_persisting_outputs(self):
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "runtime.json"
+            profiles = {"command": command_profile()}
+            state = OrchestratorState(fixture_catalog(), profiles, path)
+            state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 2}})
+            completed = SimpleNamespace(
+                returncode=0,
+                stdout='{"token":"provider-secret","ok":true}',
+                stderr="stderr-secret",
+            )
+            with mock.patch("orchestrator.subprocess.run", return_value=completed):
+                first = state.dispatch(dispatch_job("restart-key"))
+            self.assertEqual("completed", first["status"])
+            persisted = path.read_text(encoding="utf-8")
+            for forbidden in ("restart-key", "provider-secret", "stderr-secret"):
+                self.assertNotIn(forbidden, persisted)
+            provider_entry = json.loads(persisted)["idempotency"][0]
+            self.assertTrue(provider_entry["provider_call_possible"])
+            self.assertIsNone(provider_entry["result"])
+            self.assertIsNotNone(provider_entry["expires_at"])
+
+            restarted = OrchestratorState(fixture_catalog(), profiles, path)
+            with mock.patch("orchestrator.subprocess.run") as run:
+                replay = restarted.dispatch(dispatch_job("restart-key"))
+            self.assertEqual("ambiguous", replay["status"])
+            run.assert_not_called()
+            changed = dispatch_job("restart-key")
+            changed["argv"].append("--different")
+            with self.assertRaisesRegex(OrchestratorError, "already used"):
+                restarted.dispatch(changed)
+
+    def test_nonprovider_results_replay_exactly_after_restart(self):
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "runtime.json"
+            profiles = {
+                "manual": {
+                    "id": "manual",
+                    "adapter": "manual",
+                    "enabled": True,
+                    "allow_dispatch": True,
+                    "account_id": "safe-account",
+                    "auth": {"mode": "manual"},
+                }
+            }
+            state = OrchestratorState(fixture_catalog(), profiles, path)
+            state.arm({"providers": ["safe-account"], "shutdown": {"max_jobs": 2}})
+            manual_job = dispatch_job("manual-restart-key", "manual")
+            manual = state.dispatch(manual_job)
+            state.disarm("create a deterministic blocked result")
+            blocked_job = dispatch_job("blocked-restart-key", "manual")
+            blocked = state.dispatch(blocked_job)
+            self.assertEqual("manual_handoff", manual["status"])
+            self.assertEqual("blocked", blocked["status"])
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            entries = {entry["key_hash"]: entry for entry in payload["idempotency"]}
+            for key, expected in (
+                ("manual-restart-key", manual),
+                ("blocked-restart-key", blocked),
+            ):
+                entry = entries[hashlib.sha256(key.encode("utf-8")).hexdigest()]
+                self.assertFalse(entry["provider_call_possible"])
+                self.assertEqual("completed", entry["state"])
+                self.assertEqual(expected, entry["result"])
+                self.assertEqual(expected["status"], entry["final_status"])
+                self.assertEqual(hashlib.sha256(canonical_json(expected).encode()).hexdigest(), entry["result_hash"])
+                expiry = datetime.fromisoformat(entry["expires_at"].replace("Z", "+00:00"))
+                self.assertGreater(expiry, datetime.now(timezone.utc))
+                self.assertLessEqual(expiry, datetime.now(timezone.utc) + timedelta(days=31))
+
+            restarted = OrchestratorState(fixture_catalog(), profiles, path)
+            with mock.patch("orchestrator.subprocess.run") as run:
+                manual_replay = restarted.dispatch(manual_job)
+                blocked_replay = restarted.dispatch(blocked_job)
+            self.assertEqual(manual, manual_replay)
+            self.assertEqual(blocked, blocked_replay)
+            self.assertNotEqual("ambiguous", manual_replay["status"])
+            self.assertNotEqual("ambiguous", blocked_replay["status"])
+            run.assert_not_called()
+
+    def test_expired_idempotency_tombstone_is_collected_and_key_can_be_reused(self):
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "runtime.json"
+            key = "expired-provider-key"
+            now = datetime.now(timezone.utc)
+            payload = {
+                "schema_version": 2,
+                "saved_at": now.isoformat(),
+                "restart_behavior": "always_disarmed",
+                "usage": {},
+                "idempotency": [
+                    {
+                        "key_hash": hashlib.sha256(key.encode("utf-8")).hexdigest(),
+                        "request_hash": "a" * 64,
+                        "state": "completed",
+                        "job_id": "job-1",
+                        "updated_at": (now - timedelta(days=31)).isoformat(),
+                        "expires_at": (now - timedelta(seconds=1)).isoformat(),
+                        "provider_call_possible": True,
+                        "final_status": "completed",
+                        "result_hash": "b" * 64,
+                        "result": None,
+                    }
+                ],
+            }
+            path.write_text(canonical_json(payload), encoding="utf-8")
+
+            state = OrchestratorState(
+                fixture_catalog(), {"command": command_profile()}, path
+            )
+            self.assertEqual({}, state.results)
+            self.assertEqual([], json.loads(path.read_text(encoding="utf-8"))["idempotency"])
+            with mock.patch("orchestrator.subprocess.run") as run:
+                result = state.dispatch(dispatch_job(key))
+            self.assertEqual("blocked", result["status"])
+            self.assertEqual(1, len(state.results))
+            run.assert_not_called()
+
+    def test_invalid_runtime_state_fails_closed(self):
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "runtime.json"
+            path.write_text('{"schema_version":2,"usage":[],"idempotency":[]}', encoding="utf-8")
+            with self.assertRaisesRegex(OrchestratorError, "Runtime usage state"):
+                OrchestratorState(fixture_catalog(), {}, path)
+
+    def test_claude_code_is_planner_only_even_if_misconfigured_for_dispatch(self):
+        profile = {
+            "id": "claude",
+            "adapter": "claude_code",
+            "enabled": True,
+            "allow_dispatch": True,
+            "account_id": "safe-account",
+            "command": ["claude", "--dangerously-skip-permissions"],
+            "auth": {"mode": "none"},
+            "instructions": "Review the plan manually.",
+        }
+        state = OrchestratorState(fixture_catalog(), {"claude": profile})
+        state.arm({"providers": ["safe-account"]})
+        with mock.patch("orchestrator.subprocess.run") as run:
+            result = state.dispatch(dispatch_job("claude-key", "claude"))
+        self.assertEqual("manual_handoff", result["status"])
+        self.assertTrue(any("not implemented" in item for item in result["warnings"]))
+        run.assert_not_called()
+
+    def test_disabled_profile_never_runs_command(self):
+        job = fixture_job()
+        job.update({"mode": "dispatch", "profile": "command", "idempotency_key": "command-key"})
+        profiles = {
+            "command": {
+                "id": "command",
+                "adapter": "command",
+                "enabled": False,
+                "allow_dispatch": False,
+                "account_id": "safe-account",
+                "command": ["never-run"],
+                "auth": {"mode": "none"},
+            }
+        }
+        with mock.patch("orchestrator.subprocess.run") as run:
+            state = OrchestratorState(fixture_catalog(), profiles)
+            state.arm({"providers": ["safe-account"]})
+            result = state.dispatch(job)
+        self.assertEqual("blocked", result["status"])
+        run.assert_not_called()
+
+    def test_public_profile_summary_exposes_no_auth_or_transport_topology(self):
+        result = public_profile_summary(
+            {
+                "id": "profile",
+                "account_id": "safe-account",
+                "enabled": True,
+                "allow_dispatch": True,
+                "adapter": "openai_compatible",
+                "api_key": "secret",
+                "auth": {"mode": "inline", "api_key": "secret", "key_env": "SAFE_ENV_NAME"},
+                "headers": {"Authorization": "Bearer secret"},
+                "adapter_options": {"client_secret": "secret"},
+                "base_url": "https://private.example/",
+                "command": ["C:\\Users\\private\\tool.exe"],
+            }
+        )
+        self.assertEqual(
+            {
+                "id": "profile",
+                "account_id": "safe-account",
+                "enabled": True,
+                "dispatch_enabled": True,
+                "planner_only": False,
+                "monitor_configured": False,
+                "monitor_enabled": False,
+            },
+            result,
+        )
+        serialized = canonical_json(result)
+        for forbidden in (
+            "SAFE_ENV_NAME",
+            "private.example",
+            "Users",
+            "openai_compatible",
+            "inline",
+            "secret",
+        ):
+            self.assertNotIn(forbidden, serialized)
+        job = fixture_job()
+        job["profile"] = "profile"
+        planned = plan_job(
+            job,
+            fixture_catalog(),
+            {
+                "profile": {
+                    "id": "profile",
+                    "account_id": "safe-account",
+                    "adapter": "command",
+                    "command": ["C:\\Users\\private\\tool.exe"],
+                    "auth": {"mode": "env", "key_env": "SAFE_ENV_NAME"},
+                    "endpoint": "https://private.example/",
+                }
+            },
+        )
+        self.assertEqual({"id": "profile"}, planned["profile"])
+        self.assertNotIn("SAFE_ENV_NAME", canonical_json(planned))
+
+    def test_openai_endpoint_cannot_escape_base_origin(self):
+        job = fixture_job()
+        job.update(
+            {
+                "kind": "openai_inference",
+                "payload": {"model": "example", "messages": []},
+                "mode": "dispatch",
+                "profile": "openai",
+                "idempotency_key": "origin-key",
+            }
+        )
+        profiles = {
+            "openai": {
+                "id": "openai",
+                "adapter": "openai_compatible",
+                "enabled": True,
+                "allow_dispatch": True,
+                "account_id": "safe-account",
+                "base_url": "https://safe.example/",
+                "endpoint": "https://evil.example/v1/chat/completions",
+                "auth": {"mode": "inline"},
+            }
+        }
+        state = OrchestratorState(fixture_catalog(), profiles)
+        state.arm({"providers": ["safe-account"]})
+        result = state.dispatch(job, {"api_key": "transient-only"})
+        self.assertEqual("ambiguous", result["status"])
+        self.assertTrue(any("do not retry" in warning for warning in result["warnings"]))
+
+    def test_openai_zero_auth_and_inline_auth_are_transient(self):
+        def run(auth, transient_auth, key):
+            job = fixture_job()
+            job.update(
+                {
+                    "kind": "openai_inference",
+                    "payload": {"model": "example", "messages": []},
+                    "mode": "dispatch",
+                    "profile": "openai",
+                    "idempotency_key": key,
+                }
+            )
+            profiles = {
+                "openai": {
+                    "id": "openai",
+                    "adapter": "openai_compatible",
+                    "enabled": True,
+                    "allow_dispatch": True,
+                    "account_id": "safe-account",
+                    "base_url": "http://127.0.0.1:8000/",
+                    "endpoint": "v1/chat/completions",
+                    "auth": auth,
+                }
+            }
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = (
+                b'{"ok":true,"nested":{"access_token":"provider-secret"}}'
+            )
+            opener = mock.MagicMock()
+            opener.open.return_value = response
+            with mock.patch("orchestrator.urlrequest.build_opener", return_value=opener):
+                state = OrchestratorState(fixture_catalog(), profiles)
+                state.arm({"providers": ["safe-account"]})
+                result = state.dispatch(job, transient_auth)
+            request = opener.open.call_args.args[0]
+            return result, request
+
+        no_auth_result, no_auth_request = run({"mode": "none"}, None, "no-auth-key")
+        self.assertEqual("completed", no_auth_result["status"])
+        self.assertIsNone(no_auth_request.get_header("Authorization"))
+        self.assertEqual("no-auth-key", no_auth_request.get_header("Idempotency-key"))
+        self.assertNotIn("provider-secret", canonical_json(no_auth_result))
+
+        inline_result, inline_request = run(
+            {"mode": "inline"}, {"api_key": "transient-only"}, "inline-key"
+        )
+        self.assertEqual("Bearer transient-only", inline_request.get_header("Authorization"))
+        self.assertNotIn("transient-only", canonical_json(inline_result))
+
+        with mock.patch.dict(os.environ, {"FREE_COMPUTE_TEST_KEY": "env-only"}, clear=False):
+            env_result, env_request = run(
+                {"mode": "env", "key_env": "FREE_COMPUTE_TEST_KEY"}, None, "env-key"
+            )
+        self.assertEqual("completed", env_result["status"])
+        self.assertEqual("Bearer env-only", env_request.get_header("Authorization"))
+        self.assertNotIn("env-only", canonical_json(env_result))
+
+
+class ApiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.state = OrchestratorState(
+            fixture_catalog(),
+            {
+                "private-profile": {
+                    "id": "private-profile",
+                    "adapter": "command",
+                    "enabled": False,
+                    "allow_dispatch": False,
+                    "account_id": "safe-account",
+                    "command": ["C:\\Users\\private\\provider.exe"],
+                    "base_url": "https://private.example/",
+                    "auth": {"mode": "env", "key_env": "PRIVATE_API_KEY"},
+                }
+            },
+        )
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(cls.state))
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.port = cls.server.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=2)
+
+    def request(self, method, path, body=None, headers=None):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
+        payload = None if body is None else json.dumps(body)
+        connection.request(method, path, body=payload, headers=headers or {})
+        response = connection.getresponse()
+        data = json.loads(response.read().decode("utf-8"))
+        connection.close()
+        return response.status, data
+
+    def test_health(self):
+        status, body = self.request("GET", "/health")
+        self.assertEqual(200, status)
+        self.assertEqual("ok", body["status"])
+
+    def test_loopback_host_and_origin_controls_reject_cross_site_requests(self):
+        status, body = self.request("GET", "/health", headers={"Host": "evil.example"})
+        self.assertEqual(403, status)
+        self.assertEqual("invalid_host", body["error"]["code"])
+
+        status, body = self.request(
+            "POST",
+            "/v1/plan",
+            fixture_job(),
+            {"Content-Type": "application/json", "Origin": "https://evil.example"},
+        )
+        self.assertEqual(403, status)
+        self.assertEqual("invalid_origin", body["error"]["code"])
+
+        status, body = self.request(
+            "POST",
+            "/v1/plan",
+            fixture_job(),
+            {
+                "Content-Type": "application/json",
+                "Origin": f"http://localhost:{self.port}",
+            },
+        )
+        self.assertEqual(200, status)
+        self.assertEqual("planned", body["status"])
+
+    def test_profiles_endpoint_returns_only_minimal_public_shape(self):
+        status, body = self.request("GET", "/v1/profiles")
+        self.assertEqual(200, status)
+        serialized = canonical_json(body)
+        self.assertEqual("private-profile", body["profiles"][0]["id"])
+        for forbidden in (
+            "PRIVATE_API_KEY",
+            "private.example",
+            "Users",
+            "command",
+            "base_url",
+            "auth",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_plan_endpoint(self):
+        status, body = self.request(
+            "POST", "/v1/plan", fixture_job(), {"Content-Type": "application/json"}
+        )
+        self.assertEqual(200, status)
+        self.assertEqual("planned", body["status"])
+
+    def test_usage_arm_auto_arm_and_disarm_endpoints(self):
+        self.state.disarm("test reset")
+        status, usage = self.request("GET", "/v1/usage")
+        self.assertEqual(200, status)
+        self.assertEqual("catalog", usage["accounts"][0]["status"])
+        status, armed = self.request(
+            "POST",
+            "/v1/arm",
+            {"providers": ["safe-account"], "shutdown": {"duration_minutes": 5}},
+            {"Content-Type": "application/json"},
+        )
+        self.assertEqual(200, status)
+        self.assertTrue(armed["armed"])
+        status, current = self.request("GET", "/v1/arm")
+        self.assertEqual(200, status)
+        self.assertEqual(["safe-account"], current["providers"])
+        status, disarmed = self.request(
+            "POST",
+            "/v1/disarm",
+            {"reason": "API test"},
+            {"Content-Type": "application/json"},
+        )
+        self.assertEqual(200, status)
+        self.assertFalse(disarmed["armed"])
+
+        status, result = self.request(
+            "POST",
+            "/v1/arm/auto",
+            {"job": fixture_job(), "provider_count": 1},
+            {"Content-Type": "application/json"},
+        )
+        self.assertEqual(200, status)
+        self.assertTrue(result["arm"]["armed"])
+        self.state.disarm("test cleanup")
+
+    def test_unified_server_serves_the_app_and_public_storage_ledger(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        body = response.read().decode("utf-8")
+        connection.close()
+        self.assertEqual(200, response.status)
+        self.assertIn("Free Compute", body)
+        status, storage = self.request("GET", "/v1/storage")
+        self.assertEqual(200, status)
+        self.assertEqual("safe-storage", storage["storage"][0]["id"])
+
+    def test_plan_rejects_wrong_content_type(self):
+        status, body = self.request("POST", "/v1/plan", fixture_job())
+        self.assertEqual(415, status)
+        self.assertEqual("unsupported_media_type", body["error"]["code"])
+
+    def test_api_rejects_malformed_nonfinite_and_oversized_json(self):
+        for raw in (b"{broken", b'{"schema_version":NaN}'):
+            connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
+            connection.request(
+                "POST",
+                "/v1/plan",
+                body=raw,
+                headers={"Content-Type": "application/json", "Content-Length": str(len(raw))},
+            )
+            response = connection.getresponse()
+            body = json.loads(response.read().decode("utf-8"))
+            connection.close()
+            self.assertEqual(400, response.status)
+            self.assertEqual("invalid_json", body["error"]["code"])
+
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
+        connection.putrequest("POST", "/v1/plan")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", str(MAX_BODY_BYTES + 1))
+        connection.endheaders()
+        response = connection.getresponse()
+        body = json.loads(response.read().decode("utf-8"))
+        connection.close()
+        self.assertEqual(413, response.status)
+        self.assertEqual("payload_too_large", body["error"]["code"])
+
+    def test_wrong_method_and_dispatch_without_profile_fail_closed(self):
+        status, body = self.request("PUT", "/v1/plan", {})
+        self.assertEqual(405, status)
+        self.assertEqual("method_not_allowed", body["error"]["code"])
+        job = fixture_job()
+        job["idempotency_key"] = "api-dispatch-key"
+        status, body = self.request(
+            "POST",
+            "/v1/dispatch",
+            {"job": job},
+            {"Content-Type": "application/json"},
+        )
+        self.assertEqual(409, status)
+        self.assertEqual("blocked", body["status"])
+
+
+if __name__ == "__main__":
+    unittest.main()

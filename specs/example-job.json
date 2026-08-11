@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "job_id": "example-ml-job",
+  "kind": "python",
+  "mode": "plan",
+  "argv": ["python", "train.py", "--epochs", "1"],
+  "inputs": [
+    {"name": "source", "path": "src"},
+    {"name": "dataset", "path": "data/input"}
+  ],
+  "outputs": ["outputs"],
+  "workload_types": ["training", "python"],
+  "resources": {
+    "gpu_count_min": 1,
+    "vram_gb_min": 24,
+    "vram_gb_preferred": 80,
+    "max_runtime_minutes": 240,
+    "nodes_min": 1,
+    "compute_backend": "cuda",
+    "blackwell_required": false,
+    "interruptibility": "allowed"
+  },
+  "storage": {
+    "required": false,
+    "min_gib": 10,
+    "persistence": "medium_term",
+    "access": ["drive_api"],
+    "same_provider": false,
+    "allow_credit_balance": false
+  },
+  "checkpoint": {"required": true, "interval_minutes": 15},
+  "extensions": {}
+}

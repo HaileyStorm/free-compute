@@ -1,0 +1,3655 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-08-11",
+  "owner": {
+    "identity": "redacted",
+    "app_scope": "Legitimate free compute only"
+  },
+  "policy": {
+    "maximum_financial_liability_usd": 0,
+    "payment_methods_may_be_added": false,
+    "paid_fallback_allowed": false,
+    "duplicate_accounts_allowed": false,
+    "count_advertised_as_acquired": false
+  },
+  "tracking": {
+    "started_on": "2026-08-11",
+    "usage_scope": "Usage observed after tracking began; earlier provider usage is unknown unless explicitly recorded.",
+    "tool_effectiveness": {
+      "browser": {
+        "verified_accounts": 8,
+        "acquired_accounts": 2,
+        "h100e_acquired": 1.52
+      },
+      "mail_drive": {
+        "evidence_records": 13,
+        "offers_added": 1,
+        "acquired_accounts": 0
+      },
+      "web_research": {
+        "offers_cataloged": 48,
+        "acquired_accounts": 0
+      },
+      "daily_automation": {
+        "runs": 1,
+        "material_updates": 1
+      },
+      "sibling_handoff": {
+        "evidence_records": 1,
+        "offers_added": 1,
+        "acquired_accounts": 0,
+        "h100e_acquired": 0
+      },
+      "manual": {
+        "account_sessions_ready": 3,
+        "verification_actions": 1
+      }
+    }
+  },
+  "history": [
+    {
+      "observed_on": "2026-08-11",
+      "event": "baseline",
+      "acquired_h100e_available": 72.93,
+      "acquired_usd_value": 239.94,
+      "confirmed_offer_h100e_potential": 44.39,
+      "discovered_h100e_potential": 40623.72,
+      "used_h100e_since_tracking": 0,
+      "cataloged_offers": 40,
+      "safe_accounts": 6,
+      "accounts_acquired_this_project": 2,
+      "notes": "Colab is safely acquired but unconverted; potential includes conditional grants and must not be read as acquired capacity."
+    },
+    {
+      "observed_on": "2026-08-11",
+      "event": "correction_and_research_update",
+      "acquired_h100e_available": 50.43,
+      "acquired_usd_value": 165.91,
+      "confirmed_offer_h100e_potential": 44.39,
+      "discovered_h100e_potential": 64123.72,
+      "used_h100e_since_tracking": 0,
+      "cataloged_offers": 48,
+      "safe_accounts": 6,
+      "accounts_acquired_this_project": 2,
+      "notes": "Saturn remains a safe card-free account but is unconverted and not counted until its GPU meter is proved. The catalog ceiling is non-stackable and includes conditional or ineligible offers."
+    },
+    {
+      "observed_on": "2026-08-11",
+      "event": "external_usage_observed",
+      "acquired_h100e_available": 50.43,
+      "acquired_usd_value": 165.91,
+      "confirmed_offer_h100e_potential": 44.39,
+      "discovered_h100e_potential": 64123.72,
+      "used_h100e_since_tracking": 6.43,
+      "used_h100e_external": 6.43,
+      "used_h100e_safe_acquired": 0,
+      "cataloged_offers": 48,
+      "safe_accounts": 6,
+      "accounts_acquired_this_project": 2,
+      "notes": "Read-only account inspection confirmed 6.43 H100 PCIe hours on an externally launched Lambda workload. This is actual usage, but it is payment-risk account activity and is not consumption from the safely acquired pool; Free Compute did not launch or modify it."
+    }
+  ],
+  "normalization": {
+    "unit": "H100-hour-equivalent (H100e-hour)",
+    "method_version": "price-ratio-v1",
+    "reference_gpu": "NVIDIA H100 80 GB",
+    "reference_usd_per_h100e_hour": 3.29,
+    "reference_date": "2026-08-11",
+    "reference_basis": "Lambda single-GPU H100 PCIe public price; also the median of live Hyperbolic ($3.19), Lambda ($3.29), and Modal ($3.9492) H100 hourly rates checked 2026-08-11",
+    "rules": [
+      "Fungible dollar credits: USD credit divided by 3.29.",
+      "Fixed GPU hours: hours multiplied by the listed GPU price ratio or a labeled heuristic factor.",
+      "Serverless requests, tokens, neurons, dynamic notebooks, and unspecified GPUs remain unconverted.",
+      "Only live verified account balances or claimed fixed quotas count as acquired totals; advertised offers without an account never do."
+    ],
+    "gpu_hour_factors": {
+      "B300": 1.798,
+      "B200": 1.583,
+      "H200": 1.149,
+      "H100": 1.0,
+      "RTX_PRO_6000": 0.768,
+      "A100_80GB": 0.633,
+      "A100_40GB": 0.531,
+      "L40S": 0.494,
+      "A10": 0.279,
+      "L4": 0.202,
+      "T4": 0.15,
+      "P100_HEURISTIC": 0.2
+    },
+    "sources": [
+      {
+        "url": "https://lambda.ai/instances",
+        "verified_on": "2026-08-11"
+      },
+      {
+        "url": "https://modal.com/pricing",
+        "verified_on": "2026-08-11"
+      },
+      {
+        "url": "https://www.hyperbolic.ai/docs/on-demand/quickstart",
+        "verified_on": "2026-08-11"
+      }
+    ]
+  },
+  "accounts": [
+    {
+      "id": "acct-hyperbolic",
+      "provider": "Hyperbolic",
+      "account": "Existing account (redacted)",
+      "status": "ready",
+      "balance": 111.17,
+      "balance_unit": "USD credit",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "manual_deposit_only_auto_topup_off",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "acquired_safe": true,
+      "acquired_usd_value": 111.17,
+      "acquired_h100e_hours": 33.79,
+      "acquisition_origin": "previously_had",
+      "recurrence": "one_time",
+      "usage": {
+        "used": 0,
+        "available": 111.17,
+        "unit": "USD credit",
+        "period": "current_balance",
+        "observed_on": "2026-08-11"
+      },
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100 SXM"
+        ],
+        "best_gpu": "NVIDIA H100 SXM",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": 1,
+        "compute_class": "frontier",
+        "stack": [
+          "CUDA",
+          "SSH",
+          "Linux"
+        ]
+      },
+      "usability": {
+        "access_mode": "on_demand_vm",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "containers",
+          "ssh"
+        ],
+        "usable_now": true,
+        "interruptibility": "non_interruptible",
+        "setup_friction": "low"
+      },
+      "poolability": {
+        "suitability": "poor",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "Credits are tied to this account; central use would require an approved shared service or organization feature."
+      },
+      "links": [
+        {
+          "label": "GPU console",
+          "url": "https://app.hyperbolic.ai/gpus"
+        },
+        {
+          "label": "Quickstart",
+          "url": "https://www.hyperbolic.ai/docs/on-demand/quickstart"
+        }
+      ],
+      "docs": "docs/provider-usage.md#hyperbolic",
+      "evidence": "Live Billing and GPU inventory verified 2026-08-11: $111.17 balance, $0.00/hour active cost, zero active GPUs, and auto top-up disabled. H100 SXM inventory was available from $3.19/GPU-hour.",
+      "next_action": "Use for ML GPU workloads; keep auto top-up disabled and verify $0 active cost after every run."
+    },
+    {
+      "id": "acct-lambda",
+      "provider": "Lambda Cloud",
+            "account": "Existing workspace (redacted)",
+      "status": "blocked_payment",
+      "balance": 33.52,
+      "balance_unit": "USD service credit",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "card_on_file_paid_fallback",
+      "hard_stop": false,
+      "acquired_safe": false,
+      "potential_usd_value": 33.52,
+      "potential_h100e_hours": 10.19,
+      "acquisition_origin": "previously_had",
+      "recurrence": "one_time",
+      "usage": {
+        "used": 22.89,
+        "available": 33.52,
+        "unit": "USD (monthly spend observed; remaining service credit was observed separately)",
+        "period": "August 2026",
+        "observed_on": "2026-08-11",
+        "active_jobs": 1,
+        "active_cost_per_hour": 3.29,
+        "active_runtime_hours_observed": 6.43,
+        "active_hardware": "NVIDIA H100 PCIe",
+        "external_to_app": true,
+        "reconciliation": "The $33.52 service-credit balance and $22.89 August spend were observed on separate account surfaces and are not subtracted here without a fresh billing balance."
+      },
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100 PCIe"
+        ],
+        "best_gpu": "NVIDIA H100 PCIe",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": 1,
+        "compute_class": "frontier",
+        "stack": [
+          "CUDA",
+          "SSH",
+          "Linux"
+        ]
+      },
+      "usability": {
+        "access_mode": "on_demand_vm",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "containers",
+          "ssh"
+        ],
+        "usable_now": false,
+        "interruptibility": "non_interruptible",
+        "setup_friction": "blocked_payment"
+      },
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": null,
+        "recurring_contribution": null,
+        "constraints": "Workspace usage can be centralized, but paid fallback makes this balance ineligible under the zero-liability policy."
+      },
+      "links": [
+        {
+          "label": "Instances",
+          "url": "https://lambda.ai/instances"
+        }
+      ],
+      "docs": "docs/provider-usage.md#lambda-cloud",
+      "evidence": "Live Billing verified 2026-08-11: $33.52 service credit was shown, but the dashboard says the default card is charged after credits are used or expire. A later read-only check confirmed one externally launched H100 PCIe instance running; August usage showed $22.89 total, including 6.43 hours and $21.13 on the current H100 PCIe line at $3.29/hour.",
+      "next_action": "Monitor the existing external workload read-only and do not stop or modify it. Do not launch another instance through Free Compute; first blocker is provider-enforced removal of paid fallback or a separate hard spending stop."
+    },
+    {
+      "id": "acct-modal",
+      "provider": "Modal",
+      "account": "Existing workspace (redacted)",
+      "status": "ready",
+      "balance": 30,
+      "balance_unit": "USD included compute per month",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "no_payment_method",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "acquired_safe": true,
+      "acquired_usd_value": 30,
+      "acquired_h100e_hours": 9.12,
+      "acquisition_origin": "previously_had",
+      "recurrence": "monthly",
+      "usage": {
+        "used": 0,
+        "available": 30,
+        "unit": "USD included compute",
+        "period": "monthly",
+        "observed_on": "2026-08-11"
+      },
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA T4",
+          "NVIDIA L4",
+          "NVIDIA A10",
+          "NVIDIA L40S",
+          "NVIDIA A100",
+          "NVIDIA H100",
+          "NVIDIA H200",
+          "NVIDIA B200",
+          "NVIDIA RTX PRO 6000"
+        ],
+        "best_gpu": "NVIDIA B200",
+        "memory_per_unit_gb_min": 16,
+        "memory_per_unit_gb_max": 180,
+        "unit_count_max": 8,
+        "compute_class": "blackwell",
+        "stack": [
+          "CUDA",
+          "Python",
+          "containers",
+          "serverless"
+        ]
+      },
+      "usability": {
+        "access_mode": "python_api_cli",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "web_service",
+          "containers"
+        ],
+        "usable_now": true,
+        "interruptibility": "non_interruptible",
+        "setup_friction": "low"
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "A workspace can centralize workloads and members; the included monthly credit remains tied to the workspace."
+      },
+      "links": [
+        {
+          "label": "Pricing",
+          "url": "https://modal.com/pricing"
+        },
+        {
+          "label": "Documentation",
+          "url": "https://modal.com/docs"
+        }
+      ],
+      "docs": "docs/provider-usage.md#modal",
+      "evidence": "Live Usage & Billing verified 2026-08-11: Starter includes $30/month, total spend $0, no payment method, workspace limit $30, and running apps stop at the limit.",
+      "next_action": "Use for ML GPU workloads up to the hard $30 workspace limit; never add a payment method or raise the limit."
+    },
+    {
+      "id": "acct-saturn",
+      "provider": "Saturn Cloud",
+            "account": "Card-free account (redacted)",
+      "status": "ready",
+      "balance": 150,
+      "balance_unit": "advertised compute hours per month",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "no_payment_method",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "acquired_safe": true,
+      "normalization_status": "unconverted",
+      "acquisition_origin": "found_this_project",
+      "acquired_on": "2026-08-11",
+      "recurrence": "monthly",
+      "usage": {
+        "used": 0,
+        "available": 150,
+        "unit": "advertised compute hours",
+        "period": "monthly",
+        "observed_on": "2026-08-11"
+      },
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA T4"
+        ],
+        "best_gpu": "NVIDIA T4",
+        "memory_per_unit_gb_min": 16,
+        "memory_per_unit_gb_max": 16,
+        "unit_count_max": 1,
+        "compute_class": "inference",
+        "stack": [
+          "CUDA",
+          "Jupyter",
+          "Python",
+          "Dask"
+        ]
+      },
+      "usability": {
+        "access_mode": "hosted_notebook",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "notebook",
+          "distributed"
+        ],
+        "usable_now": false,
+        "interruptibility": "unknown",
+        "setup_friction": "meter_probe_required",
+        "terms_conflict": true
+      },
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "The free personal account is isolated; the optional organization is card-billed and excluded."
+      },
+      "links": [
+        {
+          "label": "Free signup",
+          "url": "https://saturncloud.io/try/"
+        }
+      ],
+      "docs": "docs/provider-usage.md#saturn-cloud",
+      "evidence": "A card-free personal account was created 2026-08-11. One official page advertises 150 compute hours/month and a GPU, and the live selector exposes a T4, but current plan pages conflict on whether free GPU use is included. No H100e is counted until a safe meter probe proves the allowance.",
+      "next_action": "Run a minimal T4 ML probe and inspect the live usage meter; never create the optional card-billed organization."
+    },
+    {
+      "id": "acct-ultralytics",
+      "provider": "Ultralytics",
+            "account": "Card-free account (redacted)",
+      "status": "ready",
+      "balance": 5,
+      "balance_unit": "USD cloud training credit",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "no_payment_method",
+      "auto_top_up": false,
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "acquired_safe": true,
+      "acquired_usd_value": 5,
+      "acquired_h100e_hours": 1.52,
+      "acquisition_origin": "found_this_project",
+      "acquired_on": "2026-08-11",
+      "recurrence": "one_time",
+      "usage": {
+        "used": 0,
+        "available": 5,
+        "unit": "USD cloud training credit",
+        "period": "one_time",
+        "observed_on": "2026-08-11"
+      },
+      "hardware": {
+        "gpu_models": [
+          "24 advertised GPU types including H100/H200"
+        ],
+        "best_gpu": "NVIDIA H200",
+        "memory_per_unit_gb_min": 16,
+        "memory_per_unit_gb_max": 141,
+        "unit_count_max": 3,
+        "compute_class": "frontier",
+        "stack": [
+          "CUDA",
+          "Ultralytics",
+          "Python"
+        ]
+      },
+      "usability": {
+        "access_mode": "managed_training",
+        "workload_types": [
+          "python",
+          "training",
+          "computer_vision",
+          "inference"
+        ],
+        "usable_now": true,
+        "interruptibility": "unknown",
+        "setup_friction": "low"
+      },
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": true,
+        "recurring_contribution": null,
+        "constraints": "Managed jobs may be team-visible, but the signup credit is tied to the account and transferability is unverified."
+      },
+      "links": [
+        {
+          "label": "Platform",
+          "url": "https://platform.ultralytics.com/"
+        },
+        {
+          "label": "Pricing",
+          "url": "https://www.ultralytics.com/pricing"
+        }
+      ],
+      "docs": "docs/provider-usage.md#ultralytics",
+      "evidence": "A personal account was created 2026-08-11. Live Billing shows Free $0 plan, $5 signup bonus, $5 available, no payment methods, no payments, and auto top-up off.",
+      "next_action": "Use for a small computer-vision training job; keep auto top-up off and never add a card."
+    },
+    {
+      "id": "acct-kaggle",
+      "provider": "Kaggle",
+      "account": "Existing account (redacted)",
+      "status": "ready",
+      "balance": 30,
+      "balance_unit": "GPU hours per week",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "no_payment_method",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "acquired_safe": true,
+      "acquired_usd_value": 19.74,
+      "acquired_h100e_hours": 6,
+      "acquisition_origin": "previously_had",
+      "recurrence": "weekly",
+      "normalization_confidence": "low",
+      "usage": {
+        "used": 0,
+        "available": 30,
+        "unit": "GPU hours",
+        "period": "weekly",
+        "observed_on": "2026-08-11",
+        "secondary": {
+          "used": 0,
+          "available": 20,
+          "unit": "TPU hours",
+          "period": "weekly"
+        }
+      },
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA Tesla P100"
+        ],
+        "best_gpu": "NVIDIA Tesla P100",
+        "memory_per_unit_gb_min": 16,
+        "memory_per_unit_gb_max": 16,
+        "unit_count_max": 1,
+        "compute_class": "legacy",
+        "stack": [
+          "CUDA",
+          "Jupyter",
+          "Python",
+          "TPU"
+        ]
+      },
+      "usability": {
+        "access_mode": "hosted_notebook_batch",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "notebook",
+          "batch"
+        ],
+        "usable_now": true,
+        "interruptibility": "interruptible",
+        "setup_friction": "low",
+        "max_session_hours": 12
+      },
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "Personal weekly quota is not transferable or safely poolable."
+      },
+      "links": [
+        {
+          "label": "Notebooks",
+          "url": "https://www.kaggle.com/code"
+        },
+        {
+          "label": "GPU guide",
+          "url": "https://www.kaggle.com/docs/efficient-gpu-usage"
+        }
+      ],
+      "docs": "docs/provider-usage.md#kaggle",
+            "evidence": "Live account state verified 2026-08-11. Settings showed 00:00/30 GPU hours and 00:00/20 TPU hours used, leaving the full weekly quotas. GPU sessions are interruptible and hardware varies.",
+      "next_action": "Use checkpointed notebook workloads only; re-read the live weekly meter before and after each run."
+    },
+    {
+      "id": "acct-colab",
+      "provider": "Google Colab",
+      "account": "Existing account (redacted)",
+      "status": "ready",
+      "balance": null,
+      "balance_unit": "dynamic GPU/TPU access",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "not_applicable",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "acquired_safe": true,
+      "normalization_status": "unconverted",
+      "acquisition_origin": "previously_had",
+      "recurrence": "dynamic",
+      "usage": {
+        "used": null,
+        "available": null,
+        "unit": "dynamic GPU/TPU runtime",
+        "period": "dynamic",
+        "observed_on": "2026-08-11"
+      },
+      "hardware": {
+        "gpu_models": [
+          "Dynamic NVIDIA GPU or Google TPU"
+        ],
+        "best_gpu": "Unspecified at runtime",
+        "memory_per_unit_gb_min": null,
+        "memory_per_unit_gb_max": null,
+        "unit_count_max": 1,
+        "compute_class": "dynamic",
+        "stack": [
+          "CUDA",
+          "TPU",
+          "Jupyter",
+          "Python"
+        ]
+      },
+      "usability": {
+        "access_mode": "hosted_notebook",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "notebook"
+        ],
+        "usable_now": true,
+        "interruptibility": "interruptible",
+        "setup_friction": "low",
+        "max_session_hours": 12,
+        "restrictions": [
+          "no remote shells",
+          "no distributed workers"
+        ]
+      },
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "Dynamic personal quota cannot reasonably support a shared bank."
+      },
+      "links": [
+        {
+          "label": "Colab",
+          "url": "https://colab.research.google.com/"
+        },
+        {
+          "label": "FAQ",
+          "url": "https://research.google.com/colaboratory/faq.html"
+        }
+      ],
+      "docs": "docs/provider-usage.md#google-colab",
+            "evidence": "Live Colab account state verified 2026-08-11. The free runtime has dynamic unpublished limits, so it is acquired but deliberately unconverted.",
+      "next_action": "Use checkpointed interactive ML notebooks; verify the offered accelerator at runtime and never select a paid upgrade."
+    },
+    {
+      "id": "acct-openrouter",
+      "provider": "OpenRouter",
+            "account": "Existing account (redacted)",
+      "status": "empty",
+      "balance": 0,
+      "balance_unit": "USD credit",
+      "balance_as_of": "2026-08-03",
+      "payment_state": "unknown",
+      "acquisition_origin": "previously_had",
+      "recurrence": "one_time",
+      "usage": {
+        "used": null,
+        "available": 0,
+        "unit": "USD credit",
+        "period": "expired",
+        "observed_on": "2026-08-03"
+      },
+      "usability": {
+        "access_mode": "openai_compatible_api",
+        "workload_types": [
+          "inference",
+          "openai_api"
+        ],
+        "usable_now": false,
+        "interruptibility": "non_interruptible",
+        "setup_friction": "empty_balance"
+      },
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "shared_api_wrapper",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "A wrapper can centralize API use, but the present account has no balance and provider sharing terms still apply."
+      },
+      "links": [
+        {
+          "label": "API docs",
+          "url": "https://openrouter.ai/docs"
+        }
+      ],
+      "docs": "docs/provider-usage.md#openrouter",
+            "evidence": "Account history confirmed $1.16 expired and remaining balance was $0.00.",
+      "next_action": "No action unless a new card-free promotion appears."
+    },
+    {
+      "id": "acct-google-cloud",
+      "provider": "Google Cloud",
+      "account": "Existing project",
+      "status": "blocked_payment",
+      "balance": null,
+      "balance_unit": "cloud credits",
+      "balance_as_of": null,
+      "payment_state": "billing_issue",
+      "acquisition_origin": "previously_had",
+      "recurrence": "unknown",
+      "usage": {
+        "used": null,
+        "available": null,
+        "unit": "cloud credits",
+        "period": "unknown",
+        "observed_on": "2026-08-11"
+      },
+      "hardware": {
+        "gpu_models": [
+          "GPU catalog available; no safe allocation confirmed"
+        ],
+        "best_gpu": "Unverified",
+        "memory_per_unit_gb_min": null,
+        "memory_per_unit_gb_max": null,
+        "compute_class": "unknown",
+        "stack": [
+          "CUDA",
+          "TPU",
+          "VM",
+          "containers"
+        ]
+      },
+      "usability": {
+        "access_mode": "cloud_project",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "vm",
+          "tpu"
+        ],
+        "usable_now": false,
+        "interruptibility": "mixed",
+        "setup_friction": "blocked_payment"
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "provider_project",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "Cloud projects support centralized budgets and IAM, but this project is payment-blocked and unsafe under the zero-liability policy."
+      },
+      "links": [
+        {
+          "label": "Cloud console",
+          "url": "https://console.cloud.google.com/"
+        }
+      ],
+      "docs": "docs/provider-usage.md#google-cloud",
+      "evidence": "2026-07-26 suspension warning and 2026-08-01 receipt for $2.33",
+      "next_action": "Do not run compute; billing-backed usage violates the zero-liability rule."
+    },
+    {
+      "id": "acct-amazon-luna",
+      "provider": "Amazon Luna",
+      "account": "Existing membership benefit (redacted)",
+      "status": "ready",
+      "balance": 50,
+      "balance_unit": "included cloud-game catalog (50+ titles; evolving)",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "membership_backed_no_incremental_charge",
+      "acquisition_origin": "previously_had",
+      "recurrence": "dynamic",
+      "usage": {
+        "used": null,
+        "available": 50,
+        "unit": "cloud-game catalog titles (minimum advertised size)",
+        "period": "evolving catalog",
+        "observed_on": "2026-08-11"
+      },
+      "usability": {
+        "access_mode": "managed_cloud_gaming",
+        "workload_types": [
+          "cloud_gaming"
+        ],
+        "usable_now": true,
+        "interruptibility": "unknown",
+        "setup_friction": "existing_prime_membership"
+      },
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "This is a consumer streaming entitlement tied to an eligible Prime membership, not transferable credit, an API, or user-controlled compute."
+      },
+      "links": [
+        {
+          "label": "Amazon Games",
+          "url": "https://games.amazon.com/en-us/"
+        },
+        {
+          "label": "Current Luna FAQ",
+          "url": "https://www.amazongamestudios.com/en-au/news/articles/new-luna-faq?language-picker=true"
+        }
+      ],
+      "docs": "docs/provider-usage.md#amazon-luna-prime",
+      "evidence": "Official Amazon sources retrieved 2026-08-11 describe Luna Standard's evolving 50+ game catalog as included with eligible Prime membership at no additional cost.",
+      "next_action": "No acquisition action; use only as consumer cloud gaming in a supported region. Never count it as GPU/ML capacity or H100e."
+    },
+    {
+      "id": "acct-chatgpt",
+      "provider": "ChatGPT Desktop",
+      "account": "Existing account (redacted)",
+      "status": "empty",
+      "balance": 0,
+      "balance_unit": "expired referral credits (other compute)",
+      "balance_as_of": "2026-08-11",
+      "payment_state": "not_applicable",
+      "acquisition_origin": "previously_had",
+      "recurrence": "one_time",
+      "usage": {
+        "used": null,
+        "available": 0,
+        "unit": "referral credits",
+        "period": "expired",
+        "observed_on": "2026-08-11"
+      },
+      "usability": {
+        "access_mode": "desktop_app",
+        "workload_types": [
+          "codex",
+          "agent"
+        ],
+        "usable_now": false,
+        "interruptibility": "non_interruptible",
+        "setup_friction": "expired"
+      },
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "This non-GPU referral balance is gone and was never part of GPU/ML capacity."
+      },
+      "links": [
+        {
+          "label": "ChatGPT",
+          "url": "https://chatgpt.com/"
+        }
+      ],
+      "docs": "docs/provider-usage.md#chatgpt-desktop",
+      "evidence": "The user confirmed on 2026-08-11 that the referral credits are gone.",
+      "next_action": "No action; retain only as expired other-compute history."
+    }
+  ],
+  "storage": [
+    {
+      "id": "storage-google-drive-colab",
+      "provider": "Google",
+      "service": "Google Drive + Colab",
+      "status": "confirmed_free",
+      "storage_safety": "zero_liability",
+      "storage_class": "workspace_drive",
+      "account_id": "acct-colab",
+      "usable_now": true,
+      "capacity": {
+        "amount": 15,
+        "unit": "GB",
+        "normalized_bytes": 15000000000,
+        "scope": "shared Google Account quota across Drive, Gmail, and Photos"
+      },
+      "allowance_basis": "A personal Google Account includes up to 15 GB at no charge; Colab notebooks are stored in Drive.",
+      "persistence": "account_persistent",
+      "access": [
+        "web_ui",
+        "drive_mount",
+        "download"
+      ],
+      "compute_locality": "same_provider_mounted",
+      "egress": {
+        "policy": "free_with_limits",
+        "notes": "Consumer Drive does not advertise storage egress charges, but Drive operation and bandwidth quotas apply."
+      },
+      "expiry_or_reset": "No periodic reset; capacity is reclaimed after files are deleted and trash is emptied.",
+      "retention_notes": "Files persist in the account; Google may delete content after two years over quota under its storage policy.",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "quota_refusal_evidence": "At the storage limit, Drive refuses new uploads or file creation; extra space requires a separate Google One purchase.",
+      "poolability": {
+        "suitability": "poor",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "The 15 GB is shared with Gmail and Photos and remains tied to one personal account."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://support.google.com/accounts/answer/6374270?hl=en",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://research.google.com/colaboratory/faq.html",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-huggingface-hub",
+      "provider": "Hugging Face",
+      "service": "Hub private repositories and Storage Buckets",
+      "status": "confirmed_free",
+      "storage_safety": "zero_liability",
+      "storage_class": "ml_object_repository",
+      "usable_now": false,
+      "capacity": {
+        "amount": 100,
+        "unit": "GB",
+        "normalized_bytes": 100000000000,
+        "scope": "private storage per free user or free organization owner"
+      },
+      "allowance_basis": "The Hub storage-plan table gives a free user or organization 100 GB of private storage across repository types, including Storage Buckets.",
+      "persistence": "repository_persistent",
+      "access": [
+        "web_ui",
+        "hf_cli",
+        "git_lfs",
+        "s3_compatible_api"
+      ],
+      "compute_locality": "same_provider_native",
+      "egress": {
+        "policy": "free_with_limits",
+        "notes": "Downloads are available through Hub interfaces, subject to Hub rate limits and responsible-use controls."
+      },
+      "expiry_or_reset": "No periodic reset is documented; stored objects count against the owner quota until removed.",
+      "retention_notes": "Private repositories persist under the account or organization; public storage is best effort and is not counted in this quota record.",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "quota_refusal_evidence": "The free plan has a fixed 100 GB private limit and no extra-storage entitlement; higher limits require an explicit paid-plan upgrade.",
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "The quota belongs to one user or organization owner and must not be multiplied without distinct verified owners."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://huggingface.co/docs/hub/en/storage-limits",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://huggingface.co/docs/hub/storage-buckets",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-dagshub-individual",
+      "provider": "DagsHub",
+      "service": "DagsHub Storage",
+      "status": "confirmed_free",
+      "storage_safety": "zero_liability",
+      "storage_class": "ml_versioned_repository",
+      "usable_now": false,
+      "capacity": {
+        "amount": 20,
+        "unit": "GB",
+        "normalized_bytes": 20000000000,
+        "scope": "conservative floor for one Individual-plan account"
+      },
+      "allowance_basis": "The current Individual plan is $0/user/month and explicitly includes 20 GB of DagsHub Storage; larger figures elsewhere are not used for the safe floor.",
+      "persistence": "repository_persistent",
+      "access": [
+        "web_ui",
+        "dagshub_cli",
+        "dvc_remote",
+        "s3_compatible_api"
+      ],
+      "compute_locality": "cross_provider_remote",
+      "egress": {
+        "policy": "unknown",
+        "notes": "The official pages reviewed do not state a separately billable or guaranteed free egress allowance."
+      },
+      "expiry_or_reset": "No periodic reset is documented; the allowance is a storage ceiling while the Individual plan remains available.",
+      "retention_notes": "Repository storage persists under DagsHub account and repository controls; provider terms and inactive-account handling still apply.",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "quota_refusal_evidence": "The $0 Individual plan publishes a fixed storage allowance; Team capacity is a separate paid plan or trial rather than automatic overage.",
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "The free plan permits limited private collaboration, but the 20 GB floor belongs to one plan and is not assumed additive by repository."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://dagshub.com/pricing",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://dagshub.com/docs/feature_guide/dagshub_storage/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-zenodo-record",
+      "provider": "Zenodo",
+      "service": "Research archive deposit",
+      "status": "confirmed_free",
+      "storage_safety": "zero_liability",
+      "storage_class": "research_archive",
+      "usable_now": false,
+      "capacity": {
+        "amount": 50,
+        "unit": "GB",
+        "normalized_bytes": 50000000000,
+        "scope": "default quota per record; records below the limit are unlimited"
+      },
+      "allowance_basis": "Each record has a default 50 GB quota, and Zenodo permits an unlimited number of records below 50 GB; upload is free of charge for qualifying open-dissemination content.",
+      "persistence": "archive_persistent",
+      "access": [
+        "web_ui",
+        "rest_api",
+        "doi_download"
+      ],
+      "compute_locality": "archive_only",
+      "egress": {
+        "policy": "free_with_limits",
+        "notes": "Open record downloads are not described as billable egress; service and acceptable-use limits still apply."
+      },
+      "expiry_or_reset": "No periodic reset; each new record receives its own default quota.",
+      "retention_notes": "Published records are archival and receive a DOI; significant file changes after publication are restricted, so this is not scratch storage.",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "quota_refusal_evidence": "Uploads are capped at the record quota; larger deposits require an explicit quota allocation rather than automatic billing.",
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "Records are public-dissemination artifacts governed by uploader responsibility, not a general shared object store."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://help.zenodo.org/docs/deposit/manage-quota/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://about.zenodo.org/terms/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-osf-private-project",
+      "provider": "Center for Open Science",
+      "service": "OSF Storage - private project",
+      "status": "confirmed_free",
+      "storage_safety": "zero_liability",
+      "storage_class": "research_project_storage",
+      "usable_now": false,
+      "capacity": {
+        "amount": 5,
+        "unit": "GB",
+        "normalized_bytes": 5000000000,
+        "scope": "per private project or component"
+      },
+      "allowance_basis": "OSF is free to use and limits each private project or component using OSF Storage to 5 GB.",
+      "persistence": "project_persistent",
+      "access": [
+        "web_ui",
+        "osf_api",
+        "archive_export"
+      ],
+      "compute_locality": "cross_provider_remote",
+      "egress": {
+        "policy": "free_with_limits",
+        "notes": "Project file export and API access are available without a published egress charge, subject to service limits."
+      },
+      "expiry_or_reset": "No periodic reset; capacity is reclaimed when project files are deleted.",
+      "retention_notes": "Private files persist under contributor access controls; deletion is not recoverable and external add-ons are not backed up by OSF.",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "quota_refusal_evidence": "OSF enforces the private-project cap and reports exceeded capacity; continuing requires removing data, changing visibility, or connecting a separate add-on.",
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "team_allocation",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "Quota is per project/component and changes to 50 GB if that same project becomes public; private and public rows are not additive for one project."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://help.osf.io/article/139-check-your-project-or-components-storage-usage",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://help.osf.io/article/390-profile-and-account",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-osf-public-project",
+      "provider": "Center for Open Science",
+      "service": "OSF Storage - public project",
+      "status": "confirmed_free",
+      "storage_safety": "zero_liability",
+      "storage_class": "research_project_storage",
+      "usable_now": false,
+      "capacity": {
+        "amount": 50,
+        "unit": "GB",
+        "normalized_bytes": 50000000000,
+        "scope": "per public project or component"
+      },
+      "allowance_basis": "OSF is free to use and limits each public project or component using OSF Storage to 50 GB.",
+      "persistence": "project_persistent",
+      "access": [
+        "web_ui",
+        "osf_api",
+        "public_download",
+        "archive_export"
+      ],
+      "compute_locality": "cross_provider_remote",
+      "egress": {
+        "policy": "free_with_limits",
+        "notes": "Public file download and API access are available without a published egress charge, subject to service limits."
+      },
+      "expiry_or_reset": "No periodic reset; capacity is reclaimed when project files are deleted.",
+      "retention_notes": "Public project content is openly accessible; storage location, licensing, privacy, and preservation requirements must be reviewed before upload.",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "quota_refusal_evidence": "OSF enforces the public-project cap and reports exceeded capacity; continuing requires removing data or connecting a separate add-on.",
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "Quota is per project/component and requires public visibility; private and public rows are not additive for one project."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://help.osf.io/article/139-check-your-project-or-components-storage-usage",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://help.osf.io/article/390-profile-and-account",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-github-lfs",
+      "provider": "GitHub",
+      "service": "Git Large File Storage",
+      "status": "conditional_free",
+      "storage_safety": "conditional_zero_liability",
+      "storage_class": "git_lfs",
+      "usable_now": false,
+      "capacity": {
+        "amount": 10,
+        "unit": "GiB",
+        "normalized_bytes": 10737418240,
+        "scope": "included LFS storage per GitHub Free account or organization per billing cycle"
+      },
+      "allowance_basis": "GitHub Free and GitHub Free for organizations include 10 GiB of LFS storage and 10 GiB of LFS bandwidth per billing cycle.",
+      "persistence": "repository_persistent",
+      "access": [
+        "git_lfs",
+        "git_clone",
+        "git_push"
+      ],
+      "compute_locality": "same_provider_native",
+      "egress": {
+        "policy": "quota_limited",
+        "notes": "The included download bandwidth is 10 GiB per cycle; without a payment method, LFS support is disabled after the bandwidth quota is exhausted."
+      },
+      "expiry_or_reset": "Storage usage accounting and bandwidth reset at the start of each billing cycle; LFS objects persist until removed.",
+      "retention_notes": "Every LFS object version counts toward repository-owner usage, and deleting an object does not recalculate the current cycle.",
+      "payment_method": "must_be_absent",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "conditions": [
+        "The owning account has no valid payment method on file.",
+        "No budget or billing configuration enables metered overage."
+      ],
+      "quota_refusal_evidence": "Without a valid payment method, storage overage prevents new LFS pushes and bandwidth exhaustion disables LFS until the next cycle.",
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "Usage is charged to the repository owner; the hard stop is safe only while the owner has no valid payment method."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://docs.github.com/en/billing/concepts/product-billing/git-lfs",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-saturn-shared-folder",
+      "provider": "Saturn Cloud",
+      "service": "Hosted storage and shared folders",
+      "status": "terms_unverified",
+      "storage_safety": "unverified",
+      "storage_class": "notebook_workspace",
+      "account_id": "acct-saturn",
+      "usable_now": false,
+      "capacity": {
+        "amount": null,
+        "unit": "unknown",
+        "normalized_bytes": null,
+        "scope": "hosted free-account storage allowance is not consistently published"
+      },
+      "allowance_basis": "Current hosted pricing says storage costs $0.20/GB-month, while shared-folder documentation describes no direct folder charge in an infrastructure-backed context; a free hosted allowance is not established.",
+      "persistence": "unknown",
+      "access": [
+        "web_ui",
+        "mounted_shared_folder"
+      ],
+      "compute_locality": "same_provider_native",
+      "egress": {
+        "policy": "unknown",
+        "notes": "No stable hosted-free egress allowance was confirmed in the official pages reviewed."
+      },
+      "expiry_or_reset": "Unknown until the live hosted account exposes an exact meter, reset, and quota behavior.",
+      "retention_notes": "Do not store unique artifacts until persistence, deletion, and billing behavior are verified in the hosted account.",
+      "payment_method": "not_required",
+      "hard_stop": null,
+      "paid_fallback_allowed": null,
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "The current personal account is isolated, and hosted storage terms are unresolved."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://saturncloud.io/plans/saturn_cloud_plans/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://saturncloud.io/docs/user-guide/how-to/advanced/shared-folders/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-kaggle-notebook",
+      "provider": "Kaggle",
+      "service": "Notebook files, outputs, and datasets",
+      "status": "terms_unverified",
+      "storage_safety": "unverified",
+      "storage_class": "notebook_workspace",
+      "account_id": "acct-kaggle",
+      "usable_now": false,
+      "capacity": {
+        "amount": null,
+        "unit": "unknown",
+        "normalized_bytes": null,
+        "scope": "current persistent-output and dataset quota is not stated in stable official terms"
+      },
+      "allowance_basis": "Kaggle documents notebook outputs and datasets, and a Kaggle staff announcement describes best-effort file persistence, but no current contractual storage quota and hard-stop rule was verified.",
+      "persistence": "best_effort_session",
+      "access": [
+        "notebook_filesystem",
+        "saved_output",
+        "dataset_api"
+      ],
+      "compute_locality": "same_provider_native",
+      "egress": {
+        "policy": "unknown",
+        "notes": "Dataset and output downloads are supported, but a stable free transfer allowance was not confirmed."
+      },
+      "expiry_or_reset": "Notebook session files follow runtime lifecycle; saved outputs and dataset retention limits remain unverified.",
+      "retention_notes": "Interactive persistence is explicitly best effort and can lose data after crashes; export every important artifact elsewhere.",
+      "payment_method": "not_required",
+      "hard_stop": null,
+      "paid_fallback_allowed": false,
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "Notebook and dataset storage is account-bound and its current pooling terms are unverified."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://www.kaggle.com/docs/notebooks",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.kaggle.com/discussions/product-feedback/355440",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-hyperbolic-onboard",
+      "provider": "Hyperbolic",
+      "service": "On-demand instance onboard storage",
+      "status": "credit_consuming",
+      "storage_safety": "credit_consuming",
+      "storage_class": "instance_local",
+      "account_id": "acct-hyperbolic",
+      "usable_now": true,
+      "capacity": {
+        "amount": 2000,
+        "unit": "GB",
+        "normalized_bytes": 2000000000000,
+        "scope": "documented minimum onboard storage across GPU configurations"
+      },
+      "allowance_basis": "Each running GPU instance includes onboard NVMe storage; the documented configuration range is 2 TB to 24 TB, but using it consumes GPU-instance credit.",
+      "persistence": "ephemeral_instance",
+      "access": [
+        "ssh",
+        "local_filesystem",
+        "block_device"
+      ],
+      "compute_locality": "compute_attached",
+      "egress": {
+        "policy": "unknown",
+        "notes": "The reviewed storage page does not establish a zero-cost outbound-transfer allowance."
+      },
+      "expiry_or_reset": "Storage exists only for the lifetime of the running GPU instance and is erased at termination.",
+      "retention_notes": "Treat as scratch space; export checkpoints and final artifacts before terminating the credit-consuming instance.",
+      "payment_method": "credit_required",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "poolability": {
+        "suitability": "poor",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "The disk is attached to one running instance and spends the account's finite compute credit."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://www.hyperbolic.ai/docs/on-demand/storage-and-ports",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.hyperbolic.ai/docs/on-demand/quickstart",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-modal-volume",
+      "provider": "Modal",
+      "service": "Modal Volume",
+      "status": "blocked_payment",
+      "storage_safety": "payment_required",
+      "storage_class": "distributed_volume",
+      "account_id": "acct-modal",
+      "usable_now": false,
+      "capacity": {
+        "amount": null,
+        "unit": "unknown",
+        "normalized_bytes": null,
+        "scope": "metered distributed storage with no fixed free capacity documented"
+      },
+      "allowance_basis": "Modal snapshots stored bytes daily for billing; current billing documentation says a payment method is required and usage is auto-charged after credits.",
+      "persistence": "volume_persistent",
+      "access": [
+        "python_sdk",
+        "modal_cli",
+        "runtime_mount"
+      ],
+      "compute_locality": "compute_attached",
+      "egress": {
+        "policy": "unknown",
+        "notes": "Volume transfer behavior is documented, but no independent zero-cost egress allowance was confirmed."
+      },
+      "expiry_or_reset": "Storage is measured through each billing cycle and persists until explicitly deleted.",
+      "retention_notes": "Volume files persist, and deletion can remain billable for up to four days; Volume v2 is beta and not recommended for irreplaceable data.",
+      "payment_method": "required",
+      "hard_stop": false,
+      "paid_fallback_allowed": true,
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "Workspace sharing is supported, but persistent storage is billable and therefore blocked by the zero-liability policy."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://modal.com/docs/guide/volumes",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://modal.com/docs/guide/billing",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "storage-cloudflare-r2",
+      "provider": "Cloudflare",
+      "service": "R2 Standard storage",
+      "status": "blocked_payment",
+      "storage_safety": "payment_required",
+      "storage_class": "object_storage",
+      "usable_now": false,
+      "capacity": {
+        "amount": 10,
+        "unit": "GB-month",
+        "normalized_bytes": 10000000000,
+        "scope": "included Standard storage usage per monthly billing cycle"
+      },
+      "allowance_basis": "R2 includes 10 GB-month of Standard storage each month, but activation requires an R2 subscription checkout and usage above included storage or operations is billed.",
+      "persistence": "metered_persistent",
+      "access": [
+        "s3_compatible_api",
+        "workers_api",
+        "wrangler_cli",
+        "web_ui"
+      ],
+      "compute_locality": "same_provider_native",
+      "egress": {
+        "policy": "free_with_limits",
+        "notes": "Direct R2 egress is free, but connected metered services may still charge and Infrequent Access has retrieval fees."
+      },
+      "expiry_or_reset": "Included usage resets monthly; objects persist and continue generating metered storage usage until deleted.",
+      "retention_notes": "Standard objects persist under the subscription; storage is averaged as GB-month and operation quotas are separate from capacity.",
+      "payment_method": "required",
+      "hard_stop": false,
+      "paid_fallback_allowed": true,
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "provider_project",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "Buckets and APIs are shareable, but the subscription exposes billable overage and is excluded from zero-liability use."
+      },
+      "retrieved_on": "2026-08-11",
+      "sources": [
+        {
+          "url": "https://developers.cloudflare.com/r2/get-started/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://developers.cloudflare.com/r2/pricing/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    }
+  ],
+  "offers": [
+    {
+      "id": "cloudflare-workers",
+      "provider": "Cloudflare",
+      "title": "Workers Free",
+      "kind": "edge_cpu",
+      "status": "confirmed_free",
+      "allowance": "100,000 requests/day; 10 ms CPU/request; bundled D1 and KV quotas",
+      "recurrence": "daily",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 1,
+      "eligibility": "Free Cloudflare account",
+      "next_action": "Create or inspect one Cloudflare account; keep it on Free.",
+      "sources": [
+        {
+          "url": "https://developers.cloudflare.com/workers/platform/pricing/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.cloudflare.com/products/workers/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "cloudflare-workers-ai",
+      "provider": "Cloudflare",
+      "title": "Workers AI Free",
+      "kind": "accelerator_inference",
+      "status": "confirmed_free",
+      "allowance": "10,000 neurons/day; requests fail at quota unless deliberately upgraded",
+      "recurrence": "daily",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 1,
+      "eligibility": "Cloudflare Free account",
+      "next_action": "Use the same Cloudflare account as Workers; never enable the paid plan.",
+      "sources": [
+        {
+          "url": "https://developers.cloudflare.com/workers-ai/platform/pricing/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.cloudflare.com/products/workers-ai/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "circleci-free",
+      "provider": "CircleCI",
+      "title": "Free plan",
+      "kind": "ci_cpu",
+      "status": "confirmed_free",
+      "allowance": "30,000 credits/month, about 6,000 small-Docker minutes; public OSS up to 400,000 credits/month",
+      "recurrence": "monthly",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 2,
+      "eligibility": "Free account; OSS allowance requires qualifying public project",
+      "next_action": "Inspect or create one account and connect only intended repositories.",
+      "sources": [
+        {
+          "url": "https://circleci.com/pricing/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "github-actions",
+      "provider": "GitHub",
+      "title": "Actions included usage",
+      "kind": "ci_cpu",
+      "status": "confirmed_free",
+      "allowance": "2,000 standard-runner minutes/month for private repos; standard runners free for public repos",
+      "recurrence": "monthly",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 1,
+      "eligibility": "Personal GitHub Free account",
+            "next_action": "Verify the account and included-usage settings without adding billing.",
+      "sources": [
+        {
+          "url": "https://docs.github.com/en/billing/concepts/product-billing/github-actions",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "github-codespaces",
+      "provider": "GitHub",
+      "title": "Codespaces included usage",
+      "kind": "dev_cpu",
+      "status": "confirmed_free",
+      "allowance": "120 core-hours/month plus 15 GB-month storage",
+      "recurrence": "monthly",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 1,
+      "eligibility": "Personal GitHub Free account",
+      "next_action": "Verify included usage and no payment method; stop/delete idle codespaces to preserve quota.",
+      "sources": [
+        {
+          "url": "https://docs.github.com/en/billing/concepts/product-billing/github-codespaces",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "vercel-hobby",
+      "provider": "Vercel",
+      "title": "Hobby plan",
+      "kind": "serverless_cpu",
+      "status": "confirmed_free",
+      "allowance": "4 active CPU-hours/month; 360 GB-hours memory; 1M function invocations",
+      "recurrence": "rolling_30_days",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 3,
+      "eligibility": "Personal, non-commercial use only",
+      "next_action": "Use only for personal non-commercial workloads and remain on Hobby.",
+      "sources": [
+        {
+          "url": "https://vercel.com/pricing",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "netlify-free",
+      "provider": "Netlify",
+      "title": "Free credit-based plan",
+      "kind": "serverless_cpu",
+      "status": "confirmed_free",
+      "allowance": "300 credits/month; at most 30 GB-hours compute if used only for compute",
+      "recurrence": "monthly",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 3,
+      "eligibility": "Free account",
+      "next_action": "Create or inspect one account; projects pause at zero credits.",
+      "sources": [
+        {
+          "url": "https://docs.netlify.com/manage/accounts-and-billing/billing/billing-for-credit-based-plans/credit-based-pricing-plans/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "saturn-cloud-free",
+      "provider": "Saturn Cloud",
+      "title": "Try Free",
+      "kind": "gpu_notebook",
+      "status": "confirmed_free",
+      "allowance": "150 compute hours/month; up to 64 GB RAM; GPU and distributed clusters advertised",
+      "recurrence": "monthly",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "New or existing free account",
+      "account_id": "acct-saturn",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA T4"
+        ],
+        "best_gpu": "NVIDIA T4",
+        "memory_per_unit_gb_min": 16,
+        "memory_per_unit_gb_max": 16,
+        "unit_count_max": 1,
+        "compute_class": "inference"
+      },
+      "usability": {
+        "access_mode": "hosted_notebook",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "notebook",
+          "distributed"
+        ],
+        "usable_now": true
+      },
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "Free personal quota is isolated; organization creation is card-billed."
+      },
+      "next_action": "Acquired. Verify the meter with a minimal T4 ML probe; never create the optional card-billed organization.",
+      "normalized_potential": {
+        "usd_value": 74.03,
+        "h100e_hours": 22.5,
+        "period": "monthly",
+        "basis": "150 T4 hours x 0.15 H100e factor; low-confidence until live meter probe",
+        "confidence": "low"
+      },
+      "sources": [
+        {
+          "url": "https://saturncloud.io/try/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://saturncloud.io/plans/hosted/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "ultralytics-free",
+      "provider": "Ultralytics",
+      "title": "Platform Free",
+      "kind": "gpu_training",
+      "status": "confirmed_free",
+      "allowance": "$5 signup credit with personal email or $25 with work/company email; 3 concurrent cloud training jobs; 24 GPU types advertised",
+      "recurrence": "one_time",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "One truthful account; licensing terms apply",
+      "account_id": "acct-ultralytics",
+      "hardware": {
+        "gpu_models": [
+          "24 advertised GPU types including H100/H200"
+        ],
+        "best_gpu": "NVIDIA H200",
+        "memory_per_unit_gb_min": 16,
+        "memory_per_unit_gb_max": 141,
+        "unit_count_max": 3,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "managed_training",
+        "workload_types": [
+          "python",
+          "training",
+          "computer_vision",
+          "inference"
+        ],
+        "usable_now": true
+      },
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": true,
+        "recurring_contribution": null,
+        "constraints": "Signup credit is account-bound; team transferability is unverified."
+      },
+      "next_action": "Acquired through the truthful personal-email path. Use the $5 balance for a small computer-vision job; never add a card.",
+      "normalized_potential": {
+        "usd_value": 5,
+        "h100e_hours": 1.52,
+        "period": "one_time",
+        "basis": "Personal-email credit / $3.29 reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://www.ultralytics.com/pricing",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://docs.ultralytics.com/platform/quickstart",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "lightning-ai-free",
+      "provider": "Lightning AI",
+      "title": "Studios Free",
+      "kind": "gpu_notebook",
+      "status": "confirmed_free",
+      "allowance": "15 credits/month; current pricing lists about 2 hours RTX PRO 6000, 3 hours H200, 5 hours L40S, 10 hours A100, or 31 hours L4",
+      "recurrence": "monthly",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "interruptible",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Phone verification; work/.edu email instant, personal email may waitlist; country limits",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA L4",
+          "NVIDIA L40S",
+          "NVIDIA A100",
+          "NVIDIA H100",
+          "NVIDIA H200",
+          "NVIDIA RTX PRO 6000 Blackwell"
+        ],
+        "best_gpu": "NVIDIA H200",
+        "memory_per_unit_gb_min": 24,
+        "memory_per_unit_gb_max": 141,
+        "unit_count_max": 2,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "hosted_studio_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "notebook",
+          "ssh",
+          "web_service"
+        ],
+        "usable_now": false,
+        "max_session_hours": 4
+      },
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "Monthly credits can support a workspace, but free-account team-sharing terms must be verified."
+      },
+      "next_action": "Complete the interactive verification with user permission, then record the live GPU allowance before counting it.",
+      "normalized_potential": {
+        "usd_value": 17.27,
+        "h100e_hours": 5.25,
+        "period": "monthly",
+        "basis": "Conservative value-equivalent estimate across published free GPU choices",
+        "confidence": "low"
+      },
+      "sources": [
+        {
+          "url": "https://lightning.ai/docs/overview/ai-studio/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://lightning.ai/pricing/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "kaggle-notebooks",
+      "provider": "Kaggle",
+      "title": "Notebooks GPU quota",
+      "kind": "gpu_notebook",
+      "status": "confirmed_free",
+      "allowance": "30 GPU hours/week and 20 TPU hours/week live on this account; P100 availability varies with demand",
+      "recurrence": "weekly",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "interruptible",
+      "priority": 1,
+      "acquisition_origin": "previously_had",
+      "eligibility": "Existing phone-verified Kaggle account and compliant notebook use",
+      "account_id": "acct-kaggle",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA Tesla P100"
+        ],
+        "best_gpu": "NVIDIA Tesla P100",
+        "memory_per_unit_gb_min": 16,
+        "memory_per_unit_gb_max": 16,
+        "unit_count_max": 1,
+        "compute_class": "legacy"
+      },
+      "usability": {
+        "access_mode": "hosted_notebook_batch",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "notebook",
+          "batch"
+        ],
+        "usable_now": true,
+        "max_session_hours": 12
+      },
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "Personal weekly quota is not transferable."
+      },
+      "next_action": "Acquired. Use checkpointed ML notebooks and confirm the live weekly meter before and after each run.",
+      "normalized_potential": {
+        "usd_value": 19.74,
+        "h100e_hours": 6.0,
+        "period": "weekly",
+        "basis": "30 P100-equivalent hours x 0.20 heuristic factor; TPU allowance left unconverted",
+        "confidence": "low"
+      },
+      "sources": [
+        {
+          "url": "https://www.kaggle.com/docs/efficient-gpu-usage",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "colab-free",
+      "provider": "Google Colab",
+      "title": "Free hosted notebooks",
+      "kind": "gpu_tpu_notebook",
+      "status": "confirmed_free",
+      "allowance": "Free GPU/TPU access with dynamic unpublished limits; free runtimes may last up to 12 hours",
+      "recurrence": "dynamic",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "interruptible",
+      "priority": 1,
+      "acquisition_origin": "previously_had",
+      "eligibility": "Existing Google account; anti-abuse restrictions prohibit remote shells and distributed workers",
+      "account_id": "acct-colab",
+      "hardware": {
+        "gpu_models": [
+          "Dynamic NVIDIA GPU or Google TPU"
+        ],
+        "best_gpu": "Unspecified at runtime",
+        "memory_per_unit_gb_min": null,
+        "memory_per_unit_gb_max": null,
+        "unit_count_max": 1,
+        "compute_class": "dynamic"
+      },
+      "usability": {
+        "access_mode": "hosted_notebook",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "notebook"
+        ],
+        "usable_now": true,
+        "max_session_hours": 12
+      },
+      "poolability": {
+        "suitability": "none",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "Dynamic personal quota cannot reasonably support a shared bank."
+      },
+      "next_action": "Acquired but unconverted. Use checkpointed interactive ML notebooks and record the offered accelerator per session; never upgrade.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://research.google.com/colaboratory/faq.html",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "paperspace-gradient-free",
+      "provider": "DigitalOcean Paperspace",
+      "title": "Gradient Free machine",
+      "kind": "gpu_notebook",
+      "status": "unconfirmed_card_free",
+      "allowance": "Free notebook machine with NVIDIA M4000; current session/quota details not publicly stated",
+      "recurrence": "unknown",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "unknown",
+      "priority": 4,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Private workspace notebook",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA Quadro M4000"
+        ],
+        "best_gpu": "NVIDIA Quadro M4000",
+        "memory_per_unit_gb_min": 8,
+        "memory_per_unit_gb_max": 8,
+        "unit_count_max": 1,
+        "compute_class": "legacy"
+      },
+      "usability": {
+        "access_mode": "hosted_notebook",
+        "workload_types": [
+          "python",
+          "notebook",
+          "inference"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "poor",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": false,
+        "recurring_contribution": false,
+        "constraints": "Free workspace terms and payment requirements are unverified."
+      },
+      "next_action": "Low-priority legacy GPU; inspect signup only after stronger routes, and do not add payment.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://docs.digitalocean.com/products/paperspace/pricing/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.paperspace.com/pricing",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "huggingface-zerogpu",
+      "provider": "Hugging Face",
+      "title": "ZeroGPU shared quota",
+      "kind": "gpu_inference",
+      "status": "unconfirmed_card_free",
+      "allowance": "5 minutes/day for authenticated free users; 48 GB large or 96 GB xlarge RTX PRO 6000 Blackwell slices; xlarge costs 2x quota",
+      "recurrence": "daily",
+      "payment_method": "unknown",
+      "hard_stop": true,
+      "interruptibility": "interruptible",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Verified email; account older than 30 days to host up to two free Spaces",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA RTX PRO 6000 Blackwell"
+        ],
+        "best_gpu": "NVIDIA RTX PRO 6000 Blackwell",
+        "memory_per_unit_gb_min": 48,
+        "memory_per_unit_gb_max": 96,
+        "unit_count_max": 1,
+        "compute_class": "blackwell"
+      },
+      "usability": {
+        "access_mode": "gradio_function_gpu",
+        "workload_types": [
+          "python",
+          "inference",
+          "demo",
+          "web_service"
+        ],
+        "usable_now": false,
+        "max_call_seconds": 60
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "shared_api_wrapper",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "A public/private Space can centralize calls, subject to queue, quota, and Space terms."
+      },
+      "next_action": "Verify account age and card-free state; use function-bound inference/demos, not general training.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://huggingface.co/docs/hub/spaces-zerogpu",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "mistral-free-api",
+      "provider": "Mistral",
+      "title": "Studio Free/Experiment API",
+      "kind": "accelerator_inference",
+      "status": "confirmed_free",
+      "allowance": "Free hosted model API with rate limits; exact quota not publicly listed",
+      "recurrence": "ongoing",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 3,
+      "eligibility": "Mistral account",
+      "next_action": "Create or inspect the account and record actual rate limits; do not activate paid billing.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "cerebras-free",
+      "provider": "Cerebras",
+      "title": "Inference Free tier",
+      "kind": "accelerator_inference",
+      "status": "unconfirmed_card_free",
+      "allowance": "$5 trial credit plus a $0 API tier with model-specific daily limits",
+      "recurrence": "ongoing",
+      "payment_method": "unknown",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 2,
+      "eligibility": "Developer account",
+      "next_action": "Inspect signup for a card prompt and verify current free-tier limits before counting credits.",
+      "normalized_potential": {
+        "usd_value": 5,
+        "h100e_hours": 1.52,
+        "period": "signup_once",
+        "basis": "Trial credit / $3.29 reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://www.cerebras.ai/pricing",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://inference-docs.cerebras.ai/support/rate-limits",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "groq-free",
+      "provider": "Groq",
+      "title": "API Free Plan",
+      "kind": "accelerator_inference",
+      "status": "unconfirmed_card_free",
+      "allowance": "Published free per-model request and token limits, including up to 500K tokens/day on some models",
+      "recurrence": "daily",
+      "payment_method": "unknown",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 2,
+      "eligibility": "GroqCloud developer account",
+      "next_action": "Inspect signup and verify no payment method; record the live model limits.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://console.groq.com/docs/rate-limits",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://console.groq.com/docs/billing-faqs",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "amd-fireworks-credit",
+      "provider": "AMD / Fireworks AI",
+      "title": "AI Developer Program cloud credit",
+      "kind": "accelerator_inference",
+      "status": "grant_application",
+      "allowance": "$50 Fireworks inference credit, valid 90 days after issuance; review about 2 business days",
+      "recurrence": "one_time",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "non_interruptible",
+      "priority": 2,
+      "eligibility": "Accepted AMD AI Developer Program member",
+      "next_action": "Apply only with truthful eligibility; verify card-free activation before redeeming.",
+      "normalized_potential": {
+        "usd_value": 50,
+        "h100e_hours": 15.2,
+        "period": "one_time",
+        "basis": "Credit / $3.29 reference; value-equivalent inference, not raw H100 rental",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://www.amd.com/en/developer/resources/technical-articles/2026/how-to-claim-amd-cloud-credits.html",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://fireworks.ai/partners/amd",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "modal-starter",
+      "provider": "Modal",
+      "title": "Starter included compute",
+      "kind": "gpu_cloud",
+      "status": "confirmed_free",
+      "allowance": "$30/month included compute; current catalog spans T4 through B200 and RTX PRO 6000",
+      "recurrence": "monthly",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 1,
+      "acquisition_origin": "previously_had",
+      "eligibility": "Current Modal Starter workspace with no payment method",
+      "account_id": "acct-modal",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA T4",
+          "NVIDIA L4",
+          "NVIDIA A10",
+          "NVIDIA L40S",
+          "NVIDIA A100",
+          "NVIDIA H100",
+          "NVIDIA H200",
+          "NVIDIA B200",
+          "NVIDIA RTX PRO 6000"
+        ],
+        "best_gpu": "NVIDIA B200",
+        "memory_per_unit_gb_min": 16,
+        "memory_per_unit_gb_max": 180,
+        "unit_count_max": 8,
+        "compute_class": "blackwell"
+      },
+      "usability": {
+        "access_mode": "python_api_cli",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "web_service",
+          "containers"
+        ],
+        "usable_now": true
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": false,
+        "recurring_contribution": true,
+        "constraints": "Workspace membership and a central API can pool workloads; the monthly allowance remains tied to the workspace."
+      },
+      "next_action": "Acquired. Use the existing workspace; apps stop at $30. Never add a payment method or raise the limit.",
+      "normalized_potential": {
+        "usd_value": 30,
+        "h100e_hours": 9.12,
+        "period": "monthly",
+        "basis": "Included credit / $3.29 planning reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://modal.com/pricing",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://modal.com/docs/guide/billing",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "modal-academics",
+      "provider": "Modal",
+      "title": "Academics credit grant",
+      "kind": "gpu_grant",
+      "status": "grant_application",
+      "allowance": "Up to $10,000 Modal credits with B200/H100 access advertised",
+      "recurrence": "one_time",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "non_interruptible",
+      "priority": 2,
+      "eligibility": "Qualifying graduate student, lab, or researcher; application review",
+            "next_action": "Open the application from the current workspace; submit only with truthful academic/research eligibility, then verify the existing no-payment hard stop survives the award.",
+      "normalized_potential": {
+        "usd_value": 10000,
+        "h100e_hours": 3039.51,
+        "period": "one_time_maximum",
+        "basis": "Maximum grant / $3.29 planning reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://modal.com/academics",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://modal.com/pricing",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "lambda-research",
+      "provider": "Lambda Cloud",
+      "title": "Research Grant",
+      "kind": "gpu_grant",
+      "status": "blocked_payment",
+      "allowance": "Up to $5,000 Lambda cloud credits; default credit expiry 12 months unless award terms differ",
+      "recurrence": "one_time",
+      "payment_method": "required",
+      "hard_stop": false,
+      "interruptibility": "non_interruptible",
+      "priority": 2,
+      "eligibility": "Qualifying researcher; discretionary award",
+      "next_action": "Research eligibility is promising, but ordinary launch requires a card and $10 authorization hold.",
+      "normalized_potential": {
+        "usd_value": 5000,
+        "h100e_hours": 1519.76,
+        "period": "one_time_maximum",
+        "basis": "Maximum grant / $3.29 H100 reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://lambda.ai/research",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://docs.lambda.ai/public-cloud/billing/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "hyperbolic-phone-promo",
+      "provider": "Hyperbolic",
+      "title": "Phone-verification inference promo",
+      "kind": "accelerator_inference",
+      "status": "unconfirmed_card_free",
+      "allowance": "$1 promotional inference credit; cannot rent GPU instances",
+      "recurrence": "one_time",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 3,
+      "eligibility": "Phone-verified account; existing-account eligibility unknown",
+      "next_action": "After login, check whether the existing account is still eligible; never deposit the $5 needed for GPU rental.",
+      "normalized_potential": {
+        "usd_value": 1,
+        "h100e_hours": 0.3,
+        "period": "one_time",
+        "basis": "Inference credit / $3.29 reference; not raw GPU rental",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://www.hyperbolic.ai/docs/general/billing-payments",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "google-trc",
+      "provider": "Google TPU Research Cloud",
+      "title": "TRC research access",
+      "kind": "tpu_grant",
+      "status": "grant_application",
+      "allowance": "No-charge access to a cluster of more than 1,000 Cloud TPU devices",
+      "recurrence": "project_term",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "eligibility": "Accepted open research project with publication/open-source sharing obligation",
+      "next_action": "Evaluate truthful research fit and publication obligation; submit only a genuine project.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://sites.research.google/trc/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "openai-researcher-access",
+      "provider": "OpenAI",
+      "title": "Researcher Access Program",
+      "kind": "accelerator_api_grant",
+      "status": "grant_application",
+      "allowance": "Up to $1,000 API credits, valid 12 months; quarterly reviews",
+      "recurrence": "one_time",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "non_interruptible",
+      "priority": 3,
+      "eligibility": "Qualifying responsible-deployment, safety, or societal-impact research in an API-supported country",
+      "next_action": "Draft only a genuine qualifying research proposal; verify card-free award redemption.",
+      "normalized_potential": {
+        "usd_value": 1000,
+        "h100e_hours": 303.95,
+        "period": "one_time_maximum",
+        "basis": "API credit / $3.29 planning reference; value-equivalent inference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://openai.com/form/researcher-access-program/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "anthropic-researcher-access",
+      "provider": "Anthropic",
+      "title": "External Researcher Access Program",
+      "kind": "accelerator_api_grant",
+      "status": "grant_application",
+      "allowance": "Typically $1,000 API credits for 12 months; first-Monday monthly reviews",
+      "recurrence": "one_time",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "non_interruptible",
+      "priority": 3,
+      "eligibility": "High-priority AI safety/alignment research",
+      "next_action": "Apply only for a real qualifying research project and verify card-free Console activation.",
+      "normalized_potential": {
+        "usd_value": 1000,
+        "h100e_hours": 303.95,
+        "period": "one_time_typical",
+        "basis": "API credit / $3.29 planning reference; value-equivalent inference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://support.claude.com/en/articles/9125743-what-is-the-external-researcher-access-program",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "cloudflare-startups",
+      "provider": "Cloudflare",
+      "title": "Cloudflare for Startups",
+      "kind": "gpu_edge_grant",
+      "status": "grant_application",
+      "allowance": "Tiered grants up to $350,000 for one year; Workers AI sub-caps by tier",
+      "recurrence": "one_time",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "non_interruptible",
+      "priority": 2,
+      "eligibility": "Qualifying technology startup founded within 10 years; upper tiers require funding and affiliated partner",
+      "next_action": "Check LLC/company website, business email, funding, and partner eligibility before applying.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.cloudflare.com/startups/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "google-startups",
+      "provider": "Google Cloud",
+      "title": "Google for Startups Cloud Program",
+      "kind": "gpu_cloud_grant",
+      "status": "grant_application",
+      "allowance": "Tiered: up to $2,000 general, $100,000 funded, or $350,000 AI-first over two years",
+      "recurrence": "program_term",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "eligibility": "Qualifying young startup; highest tier requires VC funding and Gemini-centered AI product",
+      "next_action": "Check truthful company/funding/product fit; current Google billing history is an additional blocker.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://startup.google.com/cloud/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://cloud.google.com/startup/ai",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "aws-activate",
+      "provider": "AWS",
+      "title": "Activate credits",
+      "kind": "gpu_cloud_grant",
+      "status": "blocked_payment",
+      "allowance": "Founders up to $5,000; Portfolio up to $200,000; higher AI tier invite-only",
+      "recurrence": "program_term",
+      "payment_method": "required",
+      "hard_stop": false,
+      "interruptibility": "unknown",
+      "priority": 4,
+      "eligibility": "Qualifying pre-Series-B startup; Portfolio needs provider Org ID",
+      "next_action": "Keep blocked because AWS paid-tier/card activation creates liability.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://aws.amazon.com/startups/credits/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "stanford-hai-gcp",
+      "provider": "Stanford HAI / Google Cloud",
+      "title": "Google Cloud Credit Grants",
+      "kind": "gpu_cloud_grant",
+      "status": "grant_application",
+      "allowance": "Up to $100,000 GCP credits for one year; 2026 deadline September 16 at 10:00 AM PT",
+      "recurrence": "one_time",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "unknown",
+      "priority": 4,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Stanford researcher; non-PI applicants require eligible faculty endorsement",
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Awarded to a research project and usable by its approved team; not transferable outside the award."
+      },
+      "next_action": "Treat as unavailable unless Stanford affiliation is verified.",
+      "normalized_potential": {
+        "usd_value": 100000,
+        "h100e_hours": 30395.14,
+        "period": "one_time_maximum",
+        "basis": "Maximum grant / $3.29 planning reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://hai.stanford.edu/research/grant-programs/google-cloud-credit-grants",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "access-deltaai",
+      "provider": "ACCESS / NCSA DeltaAI",
+      "title": "Explore, Discover, or Accelerate allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Rolling ACCESS allocations from 400,000 to 3,000,000 credits over at least 12 months; resource exchange to DeltaAI is provider-approved",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "U.S.-based institution-affiliated graduate-level-or-higher PI; credible research or education project",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA GH200 with H100"
+        ],
+        "best_gpu": "NVIDIA GH200 H100",
+        "memory_per_unit_gb_min": 96,
+        "memory_per_unit_gb_max": 96,
+        "unit_count_max": 4,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc"
+        ],
+        "usable_now": false,
+        "max_job_hours": 48
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Project allocations can authorize team members; credits are not transferable beyond the approved project."
+      },
+      "next_action": "Verify U.S. institutional PI eligibility and draft an Explore allocation with a DeltaAI resource justification.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://delta.ncsa.illinois.edu/deltaai-hardware-and-network/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://allocations.access-ci.org/project-types",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "access-anvil-ai",
+      "provider": "ACCESS / Purdue Anvil AI",
+      "title": "ACCESS Anvil AI allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Explore begins at 400,000 ACCESS credits for normally 12 months; Anvil AI jobs may run up to 48 hours",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "U.S.-based affiliated researcher or educator; qualified PI or advisor endorsement",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100"
+        ],
+        "best_gpu": "NVIDIA H100 80 GB",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": 4,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh_jupyter",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "notebook"
+        ],
+        "usable_now": false,
+        "max_job_hours": 48
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Designed for approved project teams; not a transferable personal credit."
+      },
+      "next_action": "Verify PI eligibility and submit an Explore request if the work fits research or education scope.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://support.access-ci.org/documentation/resources/anvil-ai",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://allocations.access-ci.org/project-types",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "chameleon-h100",
+      "provider": "Chameleon Cloud",
+      "title": "Research testbed H100 allocation",
+      "kind": "gpu_research_grant",
+      "status": "grant_application",
+      "allowance": "20,000 service units for 6 months; H100 PCIe costs 4 SU/hour, equivalent to up to 5,000 single-H100 hours if used only for that flavor",
+      "recurrence": "six_month_award",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Approved computer-science research or education project with eligible PI; normally reviewed within one business day",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100 PCIe"
+        ],
+        "best_gpu": "NVIDIA H100 PCIe",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": 4,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "research_vm_lease",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "vm",
+          "systems_research"
+        ],
+        "usable_now": false,
+        "max_lease_days": 7
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Allocation can support an approved project team; leases remain capacity-constrained."
+      },
+      "next_action": "Evaluate whether the project genuinely fits the research-testbed mission, then identify an eligible PI.",
+      "normalized_potential": {
+        "usd_value": 16450,
+        "h100e_hours": 5000,
+        "period": "six_month_maximum",
+        "basis": "20,000 SU / 4 SU per H100 hour, valued at the $3.29 H100 reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://www.chameleoncloud.org/learn/frequently-asked-questions/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "olcf-frontier-dd",
+      "provider": "OLCF Frontier",
+      "title": "Director's Discretionary allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Typically 15,000 to 20,000 Frontier node-hours for one month to one year; applications accepted year-round",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Credible open science, porting, scaling, or pilot work suitable for leadership computing",
+      "hardware": {
+        "gpu_models": [
+          "AMD Instinct MI250X"
+        ],
+        "best_gpu": "AMD Instinct MI250X",
+        "memory_per_unit_gb_min": 64,
+        "memory_per_unit_gb_max": 128,
+        "unit_count_max": 4,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "rocm"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Project allocation supports collaborators but is limited to approved science and facility rules."
+      },
+      "next_action": "Prepare a small porting/scaling case rather than a generic single-GPU workload.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://docs.olcf.ornl.gov/systems/frontier_user_guide.html",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.alcf.anl.gov/news/does-incite-program-seeks-proposals-2027-advance-science-and-engineering-us-leadership",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "alcf-aurora-dd",
+      "provider": "ALCF Aurora",
+      "title": "Director's Discretionary allocation",
+      "kind": "accelerator_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Year-round discretionary allocation; amount and duration are proposal-dependent",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Science or engineering scaling and leadership-computing preparation",
+      "hardware": {
+        "gpu_models": [
+          "Intel Data Center GPU Max 1550"
+        ],
+        "best_gpu": "Intel Data Center GPU Max 1550",
+        "memory_per_unit_gb_min": 128,
+        "memory_per_unit_gb_max": 128,
+        "unit_count_max": 6,
+        "compute_class": "frontier_alt"
+      },
+      "usability": {
+        "access_mode": "pbs_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "oneapi",
+          "sycl"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Project team access is supported; portability to oneAPI/SYCL is the practical gate."
+      },
+      "next_action": "Assess Intel oneAPI/SYCL compatibility and a leadership-computing readiness case.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.alcf.anl.gov/support-center/get-started/request-allocation",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.alcf.anl.gov/aurora",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "eurohpc-ai-science",
+      "provider": "EuroHPC JU",
+      "title": "AI for Science access",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Six-month AI/ML allocation; current cutoff August 31, 2026 with results expected by the end of September",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Scientific AI/ML applicant affiliated with an EU Member or associated country",
+      "hardware": {
+        "gpu_models": [
+          "AMD MI250X",
+          "NVIDIA A100",
+          "NVIDIA GH200"
+        ],
+        "best_gpu": "NVIDIA GH200 H100",
+        "memory_per_unit_gb_min": 64,
+        "memory_per_unit_gb_max": 96,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "hpc_batch_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda",
+          "rocm"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Award supports an approved scientific team for six months and requires final reporting."
+      },
+      "next_action": "Verify European affiliation and prepare the scope and compute plan before the August 31 cutoff.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.eurohpc-ju.europa.eu/document/download/a3fd3cad-cf13-4c0c-9257-b5cf5c70f2c5_en?filename=EuroHPC+AI+for+Science+Access+-+Full+Call+Details_0.pdf",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://docs.lumi-supercomputer.eu/hardware/lumig/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "intel-tiber-free",
+      "provider": "Intel Tiber AI Cloud",
+      "title": "120-day Developer Cloud access",
+      "kind": "accelerator_cloud_trial",
+      "status": "unconfirmed_card_free",
+      "allowance": "Free access for 120 days with extensions possible; exact per-user accelerator quota is unpublished",
+      "recurrence": "one_time",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Approved developer registration and Intel hardware use",
+      "hardware": {
+        "gpu_models": [
+          "Intel Data Center GPU Max 1100",
+          "Intel Data Center GPU Max 1550"
+        ],
+        "best_gpu": "Intel Data Center GPU Max 1550",
+        "memory_per_unit_gb_min": 48,
+        "memory_per_unit_gb_max": 128,
+        "unit_count_max": null,
+        "compute_class": "frontier_alt"
+      },
+      "usability": {
+        "access_mode": "jupyter_vscode_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "notebook",
+          "ssh",
+          "oneapi",
+          "sycl"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Entitlement and quota are account-specific; team/project sharing terms are unpublished."
+      },
+      "next_action": "Inspect registration for payment requirements and obtain the exact GPU entitlement before counting it.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.intel.com/content/www/us/en/developer/platform/data-center-gpu-max.html",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.intel.com/content/dam/www/central-libraries/us/en/documents/2023-01/data-center-gpu-max-series-product-brief.pdf",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "nebius-research",
+      "provider": "Nebius",
+      "title": "Research Grants 2026-27",
+      "kind": "gpu_cloud_grant",
+      "status": "grant_application",
+      "allowance": "Proposal-sized GPU cloud grant; amount is not publicly capped, with decisions expected late Q3 to early Q4",
+      "recurrence": "project_term",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "mixed",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Academic or nonprofit researchers with a credible resource plan and openness to collaboration/visibility",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100",
+          "NVIDIA H200",
+          "NVIDIA B200"
+        ],
+        "best_gpu": "NVIDIA B200",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 180,
+        "unit_count_max": null,
+        "compute_class": "blackwell"
+      },
+      "usability": {
+        "access_mode": "gpu_cloud_vm_cluster",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "vm",
+          "containers",
+          "distributed"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "provider_project",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "A grant project can centralize approved team workloads; award size and billing isolation must be confirmed."
+      },
+      "next_action": "Verify academic/nonprofit eligibility and request only the justified H100/H200/B200 resource plan.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://nebius.com/nebius-research-grants",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://nebius.com/services",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "nairr-voltage-park",
+      "provider": "NAIRR Pilot / Voltage Park",
+      "title": "H100 research allocation",
+      "kind": "gpu_research_grant",
+      "status": "grant_application",
+      "allowance": "NAIRR reports a one-million-H100-GPU-hour contribution overall; live per-project amount and request availability are portal-specific",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "U.S.-based institution-affiliated researcher/educator or eligible federally funded small business",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100"
+        ],
+        "best_gpu": "NVIDIA H100 80 GB",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "research_cloud_allocation",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "distributed"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Merit-reviewed allocation can support a named project team; current H100 request availability needs portal confirmation."
+      },
+      "next_action": "Check the live NAIRR catalogue before claiming the H100 resource is currently requestable.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.nsf.gov/news/voltage-park-joins-nsf-led-national-ai-research-resource",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://nsf-gov-resources.nsf.gov/files/NAIRR-2-Year-Progress-Update.pdf",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "amd-india-devcloud",
+      "provider": "AMD Developer Cloud India",
+      "title": "MI300X free developer-cloud hours",
+      "kind": "gpu_developer_grant",
+      "status": "unconfirmed_card_free",
+      "allowance": "Shared program pool of 100,000 free hours announced through September 2026; per-recipient quota and current application route are unpublished",
+      "recurrence": "project_term",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "unknown",
+      "priority": 3,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "India-based researcher, startup, or open-source contributor",
+      "hardware": {
+        "gpu_models": [
+          "AMD Instinct MI300X"
+        ],
+        "best_gpu": "AMD Instinct MI300X",
+        "memory_per_unit_gb_min": 192,
+        "memory_per_unit_gb_max": 192,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "developer_cloud",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "rocm"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Program allocations may support projects, but the active application and team-sharing rules are not published."
+      },
+      "next_action": "Treat as watchlist unless India eligibility and a current official application route are established.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.amd.com/en/blogs/2025/100k-hours-free-developer-cloud-access.html",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "cloudbank-aws-p5",
+      "provider": "ACCESS CloudBank / AWS",
+      "title": "Commercial-cloud research allocation",
+      "kind": "gpu_cloud_grant",
+      "status": "grant_application",
+      "allowance": "ACCESS-funded cloud budgets up to $10,000, $37,500, or $75,000 per year; CloudBank says it is not intended for large GPU-intensive workloads",
+      "recurrence": "annual",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "mixed",
+      "priority": 4,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "U.S.-based researcher or educator with approved ACCESS allocation and cost estimate",
+      "hardware": {
+        "gpu_models": [
+          "AWS P5 NVIDIA H100"
+        ],
+        "best_gpu": "NVIDIA H100 80 GB",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": 8,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "commercial_cloud_vm",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "vm",
+          "containers",
+          "distributed"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "provider_project",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "CloudBank manages a project budget, but all service costs consume the award and GPU-heavy use is discouraged."
+      },
+      "next_action": "Use only if ACCESS eligibility is met and the proposal is not a large GPU-intensive workload.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.cloudbank.org/training/access-cloudbank-research",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://aws.amazon.com/ec2/instance-types/p5/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "ukri-airr-gateway",
+      "provider": "UKRI AIRR",
+      "title": "Gateway Route GPU allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Up to 10,000 GPU-hours over 3 months on Isambard-AI or Dawn",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Qualifying UK academic, industry, charity, or not-for-profit project lead",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA GH200 H100",
+          "Intel Data Center GPU Max 1550"
+        ],
+        "best_gpu": "NVIDIA GH200 H100",
+        "memory_per_unit_gb_min": 96,
+        "memory_per_unit_gb_max": 128,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "scheduled_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda",
+          "oneapi"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Collaborative projects are allowed; named-member and administrator mechanics still require verification."
+      },
+      "next_action": "Verify a truthful qualifying UK organization and project lead before applying.",
+      "normalized_potential": {
+        "usd_value": 32900,
+        "h100e_hours": 10000,
+        "period": "three_month_upper_bound",
+        "basis": "10,000 GPU-hours if awarded entirely on GH200/H100, valued at the $3.29 H100 reference",
+        "confidence": "medium"
+      },
+      "sources": [
+        {
+          "url": "https://www.ukri.org/opportunity/access-to-isambard-ai-and-dawn-airr-supercomputers-gateway-route/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.bristol.ac.uk/research/centres/bristol-supercomputing/articles/2025/lifting-the-lid-on-isambard-ai.html",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "cscs-alps-preparatory",
+      "provider": "CSCS Alps",
+      "title": "Preparatory Project allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "250 GH200 node-hours over 3 months; up to 3 named accounts",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "International academic postdoc or PI with a credible GPU porting or benchmark plan",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA GH200 H100"
+        ],
+        "best_gpu": "NVIDIA GH200 H100",
+        "memory_per_unit_gb_min": 96,
+        "memory_per_unit_gb_max": 96,
+        "unit_count_max": 4,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "Explicitly supports up to three named accounts; credentials remain individual."
+      },
+      "next_action": "Identify a qualified academic PI and narrowly scoped porting or benchmark project.",
+      "normalized_potential": {
+        "usd_value": 3290,
+        "h100e_hours": 1000,
+        "period": "three_month_award",
+        "basis": "250 nodes x 4 GH200 H100 GPUs, valued at the $3.29 H100 reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://www.cscs.ch/user-lab/allocation-schemes/preparatory-projects",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://docs.cscs.ch/alps/hardware/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "idris-jean-zay-dynamic",
+      "provider": "IDRIS / GENCI Jean Zay",
+      "title": "Dynamic Access GPU allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Up to 50,000 normalized GPU-hours, valid one year and renewable; 1 H100 hour equals 4 normalized hours",
+      "recurrence": "annual",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Eligible eDARI research project; French authorization requirements may apply",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100"
+        ],
+        "best_gpu": "NVIDIA H100 80 GB",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "Individual accounts attach to a common project dossier and project storage; award rules govern membership."
+      },
+      "next_action": "Verify eDARI eligibility and any French security authorization before preparing a request.",
+      "normalized_potential": {
+        "usd_value": 41125,
+        "h100e_hours": 12500,
+        "period": "annual_upper_request",
+        "basis": "50,000 normalized hours / 4 per H100 hour, valued at the $3.29 H100 reference",
+        "confidence": "high"
+      },
+      "sources": [
+        {
+          "url": "https://www.idris.fr/docs/dari/demandes-heures/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.idris.fr/eng/jean-zay/gpu/jean-zay-gpu-exec_partition_slurm-eng.html",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "naiss-berzelius-hopper",
+      "provider": "NAISS / Berzelius",
+      "title": "Hopper H200 project allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Monthly-reviewed 2026 project route; award size is proposal-dependent",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Eligible Swedish research project; KAW-funded projects prioritized during the pilot",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H200"
+        ],
+        "best_gpu": "NVIDIA H200",
+        "memory_per_unit_gb_min": 141,
+        "memory_per_unit_gb_max": 141,
+        "unit_count_max": 8,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh_headless",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda",
+          "automation"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "PI-managed membership, proxies, and authorized headless use are supported; credentials remain personal."
+      },
+      "next_action": "Verify Swedish project eligibility and pilot priority before requesting H200 resources.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://supr.naiss.se/resource/berzelius-hopper/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.naiss.se/policies/terms-of-use/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "naiss-medium-gpu",
+      "provider": "NAISS",
+      "title": "Medium national GPU allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Monthly 2026 allocation rounds; award size and system are proposal-dependent",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Swedish academic PI at assistant-professor level or higher",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100",
+          "NVIDIA H200",
+          "NVIDIA A100 80 GB",
+          "NVIDIA L40S",
+          "AMD MI250X"
+        ],
+        "best_gpu": "NVIDIA H200",
+        "memory_per_unit_gb_min": 48,
+        "memory_per_unit_gb_max": 141,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda",
+          "rocm"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "PI-managed project membership is supported; allocations remain tied to approved Swedish research."
+      },
+      "next_action": "Verify Swedish academic PI affiliation and choose a matching current GPU resource.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://supr.naiss.se/round/2026medium/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://hpc.pages.naiss.se/training/NAISS_Slurm/jobscripts/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://www.naiss.se/allocations/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "nectar-national-gpu-standard",
+      "provider": "ARDC Nectar",
+      "title": "National GPU Service standard allocation",
+      "kind": "gpu_research_cloud",
+      "status": "grant_application",
+      "allowance": "Six-month trial for eligible Australian researchers; longer merit allocations up to 12 months and renewable",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "non_interruptible",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Eligible Australian institutional researcher with AAF access or national-merit allocation",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA A40",
+          "NVIDIA A100"
+        ],
+        "best_gpu": "NVIDIA A100",
+        "memory_per_unit_gb_min": 40,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": null,
+        "compute_class": "datacenter"
+      },
+      "usability": {
+        "access_mode": "research_cloud_project",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "vm",
+          "containers",
+          "batch"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "provider_project",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "Cloud project/team semantics support centralized use; exact quota delegation requires verification."
+      },
+      "next_action": "Verify Australian institutional eligibility and request the standard reserved lane, not preemptible spare capacity.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://ardc.edu.au/services/ai-and-ml-tools-for-research/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://ardc.edu.au/resource/cloud-computing-for-research/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "nectar-national-gpu-preemptible",
+      "provider": "ARDC Nectar",
+      "title": "National GPU Service preemptible spare capacity",
+      "kind": "gpu_research_cloud",
+      "status": "grant_application",
+      "allowance": "Preemptible spare-capacity GPU instances within an eligible Nectar research project; exact quota varies",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "interruptible",
+      "priority": 3,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Eligible Australian institutional researcher with an approved Nectar project",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA A40",
+          "NVIDIA A100"
+        ],
+        "best_gpu": "NVIDIA A100",
+        "memory_per_unit_gb_min": 40,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": null,
+        "compute_class": "datacenter"
+      },
+      "usability": {
+        "access_mode": "preemptible_research_vm",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "vm",
+          "containers",
+          "batch",
+          "checkpointed"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "provider_project",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "Project membership is supported, but every workload must tolerate reclamation and checkpoint externally."
+      },
+      "next_action": "Use only for explicitly checkpointable work after the underlying research project is approved.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://ardc.edu.au/services/ai-and-ml-tools-for-research/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://ardc.edu.au/resource/cloud-computing-for-research/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "csc-finland-roihu-lumi",
+      "provider": "CSC Finland",
+      "title": "Academic GPU project allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Academic project allocation, typically valid one year; award units depend on the approved project",
+      "recurrence": "annual",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 2,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Finnish higher-education or state-research organization member",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA GH200 H100",
+          "AMD MI250X"
+        ],
+        "best_gpu": "NVIDIA GH200 H100",
+        "memory_per_unit_gb_min": 64,
+        "memory_per_unit_gb_max": 96,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda",
+          "rocm"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "Project-level allocation and accounting support named members; automation permissions require verification."
+      },
+      "next_action": "Verify Finnish institutional affiliation and create an eligible academic project.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://docs.csc.fi/accounts/how-to-create-new-project/",
+          "verified_on": "2026-08-11"
+        },
+        {
+          "url": "https://docs.csc.fi/support/tutorials/gpu-ml/",
+          "verified_on": "2026-08-11"
+        }
+      ]
+    }
+  ],
+  "blockers": [
+    {
+      "id": "blocker-lambda-paid-fallback",
+      "rank": 1,
+      "provider": "Lambda Cloud",
+      "status": "action_required_by_provider",
+      "summary": "A $33.52 service-credit balance was observed, but a saved card is charged after exhaustion or expiry; one external H100 PCIe workload is currently running and accruing usage.",
+      "needed": "Leave the existing external workload under its owner's control. A provider-enforced hard stop or removal of every paid fallback is required before Free Compute may launch anything.",
+      "next_action": "Monitor the active workload and live billing read-only. Ask Lambda support whether the workspace can be made credit-only; Free Compute must not launch or stop instances while the card fallback remains."
+    },
+    {
+      "id": "blocker-lightning-verification",
+      "rank": 2,
+      "provider": "Lightning AI",
+      "status": "user_verification",
+      "summary": "Recurring interruptible GPU credits require phone verification; a personal email may be waitlisted.",
+      "needed": "Phone verification and any interactive anti-abuse check by the account owner.",
+      "next_action": "Complete verification, then record the live monthly credit and GPU-hour allowance."
+    },
+    {
+      "id": "blocker-modal-grant-eligibility",
+      "rank": 3,
+      "provider": "Modal",
+      "status": "eligibility_input",
+            "summary": "The current workspace exposes an application for startup or academic GPU credits, potentially up to $10,000 for academics.",
+      "needed": "Truthful project, company, funding, or academic affiliation details that are not inferable from account state.",
+      "next_action": "Provide the applicable eligibility facts; then submit the strongest truthful application and preserve the no-payment hard stop."
+    },
+    {
+      "id": "blocker-saturn-meter-probe",
+      "rank": 4,
+      "provider": "Saturn Cloud",
+      "status": "open",
+            "summary": "The card-free account is claimed, but conflicting official terms leave the advertised 150 monthly hours and live T4 option unconverted.",
+      "needed": "A minimal safe workspace run and usage-meter read, without creating a card-billed organization.",
+      "next_action": "Run a tiny T4 ML probe, stop it immediately, and replace the estimate with measured quota behavior."
+    }
+  ]
+}

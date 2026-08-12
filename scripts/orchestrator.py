@@ -24,6 +24,8 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import urljoin, urlsplit
 
+from validate_catalog import validate_catalog
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "data" / "catalog.json"
 DEFAULT_PROFILES = ROOT / "config" / "providers.local.json"
@@ -35,6 +37,7 @@ MAX_ARM_MINUTES = 7 * 24 * 60
 MIN_MONITOR_SECONDS = 15
 MAX_MONITOR_AGE_SECONDS = 15 * 60
 MAX_IDEMPOTENCY_TOMBSTONES = 4096
+MAX_METER_EVENTS = 4096
 IDEMPOTENCY_RETENTION_DAYS = 30
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SAFE_PAYMENT_STATES = {
@@ -54,7 +57,6 @@ STATIC_FILES = {
     "/index.html": "index.html",
     "/app.js": "app.js",
     "/styles.css": "styles.css",
-    "/data/catalog.json": "data/catalog.json",
 }
 ACCESS_ALIASES = {
     "s3": {"s3", "s3_api", "s3_compatible", "s3_compatible_api"},
@@ -347,6 +349,7 @@ def load_profiles(path: Path | None) -> dict[str, dict[str, Any]]:
     if not isinstance(records, list):
         raise OrchestratorError("invalid_config", "profiles must be a list")
     result: dict[str, dict[str, Any]] = {}
+    enabled_monitor_accounts: set[str] = set()
     for index, profile in enumerate(records):
         if not isinstance(profile, dict):
             raise OrchestratorError("invalid_config", f"profiles[{index}] must be an object")
@@ -395,6 +398,16 @@ def load_profiles(path: Path | None) -> dict[str, dict[str, Any]]:
                 raise OrchestratorError(
                     "invalid_config", f"usage_monitor.auth for {profile_id} must be none or env"
                 )
+            if monitor.get("enabled") is True:
+                if not isinstance(account_id, str) or ID_RE.fullmatch(account_id) is None:
+                    raise OrchestratorError(
+                        "invalid_config", f"enabled usage_monitor for {profile_id} needs an account_id"
+                    )
+                if account_id in enabled_monitor_accounts:
+                    raise OrchestratorError(
+                        "invalid_config", f"More than one enabled usage_monitor targets {account_id}"
+                    )
+                enabled_monitor_accounts.add(account_id)
         result[profile_id] = profile
     return result
 
@@ -1171,7 +1184,14 @@ def _parse_iso(value: Any, path: str, *, code: str = "invalid_arm") -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _finite_number(value: Any, path: str, *, nonnegative: bool = False) -> float | int | None:
+def _finite_number(
+    value: Any,
+    path: str,
+    *,
+    nonnegative: bool = False,
+    code: str = "invalid_monitor_response",
+    status: int = 502,
+) -> float | int | None:
     if value is None:
         return None
     if (
@@ -1181,13 +1201,67 @@ def _finite_number(value: Any, path: str, *, nonnegative: bool = False) -> float
         or (nonnegative and value < 0)
     ):
         qualifier = " finite and nonnegative" if nonnegative else " finite"
-        raise OrchestratorError("invalid_monitor_response", f"{path} must be{qualifier}", status=502)
+        raise OrchestratorError(code, f"{path} must be{qualifier}", status=status)
     return value
 
 
 def _monitor_config(profile: dict[str, Any]) -> dict[str, Any] | None:
     config = profile.get("usage_monitor")
     return config if isinstance(config, dict) else None
+
+
+def _short_unit(value: Any, path: str, *, code: str, status: int) -> str:
+    if not isinstance(value, str) or not value or len(value) > 32:
+        raise OrchestratorError(code, f"{path} must be a short nonempty string", status=status)
+    return value
+
+
+def _canonical_meters(value: Any, *, code: str, status: int) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 256:
+        raise OrchestratorError(code, "meters must be an array of at most 256 entries", status=status)
+    meters: list[dict[str, Any]] = []
+    ids: set[str] = set()
+    allowed = {"id", "kind", "value", "unit", "available", "used", "reset_at", "expires_at"}
+    for index, meter in enumerate(value):
+        path = f"meters[{index}]"
+        if not isinstance(meter, dict) or set(meter) - allowed:
+            raise OrchestratorError(code, f"{path} has unsupported fields", status=status)
+        meter_id = meter.get("id")
+        if not isinstance(meter_id, str) or ID_RE.fullmatch(meter_id) is None or meter_id in ids:
+            raise OrchestratorError(code, f"{path}.id must be a unique stable id", status=status)
+        ids.add(meter_id)
+        kind = meter.get("kind")
+        if not isinstance(kind, str) or not kind or len(kind) > 64:
+            raise OrchestratorError(code, f"{path}.kind must be a short nonempty string", status=status)
+        canonical = {
+            "id": meter_id,
+            "kind": kind,
+            "value": _finite_number(meter.get("value"), f"{path}.value", code=code, status=status),
+            "unit": _short_unit(meter.get("unit"), f"{path}.unit", code=code, status=status),
+            "available": _finite_number(meter.get("available"), f"{path}.available", nonnegative=True, code=code, status=status),
+            "used": _finite_number(meter.get("used"), f"{path}.used", nonnegative=True, code=code, status=status),
+            "reset_at": meter.get("reset_at"),
+            "expires_at": meter.get("expires_at"),
+        }
+        if all(canonical[key] is None for key in ("value", "available", "used")):
+            raise OrchestratorError(
+                code, f"{path} needs value, available, or used", status=status
+            )
+        for timestamp in ("reset_at", "expires_at"):
+            if canonical[timestamp] is not None:
+                canonical[timestamp] = _iso(_parse_iso(canonical[timestamp], f"{path}.{timestamp}", code=code))
+        meters.append(canonical)
+    return meters
+
+
+def _readable_meter_values(snapshot: dict[str, Any]) -> bool:
+    legacy = (
+        "balance", "available_h100e", "used_h100e", "available_tpu_hours",
+        "used_tpu_hours", "active_jobs", "active_cost_per_hour", "expires_at",
+    )
+    return bool(snapshot.get("meters")) or any(snapshot.get(key) is not None for key in legacy)
 
 
 def _validate_monitor_url(value: Any) -> str:
@@ -1276,6 +1350,7 @@ def _poll_usage_profile(profile: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise OrchestratorError("invalid_monitor_response", "Usage response must be an object", status=502)
     result = {
+        "meters": _canonical_meters(payload.get("meters"), code="invalid_monitor_response", status=502),
         "balance": _finite_number(payload.get("balance"), "balance"),
         "balance_unit": payload.get("balance_unit"),
         "available_h100e": _finite_number(
@@ -1292,27 +1367,198 @@ def _poll_usage_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "active_cost_per_hour": _finite_number(
             payload.get("active_cost_per_hour"), "active_cost_per_hour", nonnegative=True
         ),
+        "active_cost_unit": payload.get("active_cost_unit"),
         "expires_at": payload.get("expires_at"),
     }
-    if result["balance_unit"] is not None and not isinstance(result["balance_unit"], str):
-        raise OrchestratorError(
-            "invalid_monitor_response", "balance_unit must be a string", status=502
+    if result["balance_unit"] is not None:
+        result["balance_unit"] = _short_unit(
+            result["balance_unit"], "balance_unit", code="invalid_monitor_response", status=502
         )
     if result["expires_at"] is not None and not isinstance(result["expires_at"], str):
         raise OrchestratorError("invalid_monitor_response", "expires_at must be a string", status=502)
-    meter_fields = (
+    if result["active_cost_unit"] is not None:
+        result["active_cost_unit"] = _short_unit(
+            result["active_cost_unit"], "active_cost_unit", code="invalid_monitor_response", status=502
+        )
+    if not _readable_meter_values(result):
+        raise OrchestratorError(
+            "invalid_monitor_response", "Usage response contains no readable meter values", status=502
+        )
+    return result
+
+
+OBSERVATION_FIELDS = {
+    "account_id",
+    "source",
+    "observed_at",
+    "balance",
+    "balance_unit",
+    "meters",
+    "available_h100e",
+    "used_h100e",
+    "available_tpu_hours",
+    "used_tpu_hours",
+    "active_jobs",
+    "active_cost_per_hour",
+    "active_cost_unit",
+    "expires_at",
+}
+
+
+def _canonical_observation(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise OrchestratorError("invalid_observation", "Observation must be an object")
+    unknown = set(payload) - OBSERVATION_FIELDS
+    if unknown:
+        raise OrchestratorError(
+            "invalid_observation",
+            "Observation contains unsupported fields: " + ", ".join(sorted(unknown)),
+        )
+    account_id = payload.get("account_id")
+    if not isinstance(account_id, str) or ID_RE.fullmatch(account_id) is None:
+        raise OrchestratorError("invalid_observation", "account_id is invalid")
+    source = payload.get("source", "manual")
+    if source not in {"manual", "browser", "cli"}:
+        raise OrchestratorError("invalid_observation", "source must be manual, browser, or cli")
+    observed_at = _utc_now()
+    if payload.get("observed_at") is not None:
+        observed_at = _parse_iso(payload.get("observed_at"), "observed_at", code="invalid_observation")
+        if observed_at > _utc_now() + timedelta(seconds=60):
+            raise OrchestratorError("invalid_observation", "observed_at cannot be future-dated")
+    result = {
+        "account_id": account_id,
+        "source": source,
+        "observed_at": _iso(observed_at),
+        "meters": _canonical_meters(
+            payload.get("meters"), code="invalid_observation", status=400
+        ),
+        "balance": _finite_number(
+            payload.get("balance"), "balance", code="invalid_observation", status=400
+        ),
+        "balance_unit": payload.get("balance_unit"),
+        "available_h100e": _finite_number(
+            payload.get("available_h100e"), "available_h100e", nonnegative=True,
+            code="invalid_observation", status=400
+        ),
+        "used_h100e": _finite_number(
+            payload.get("used_h100e"), "used_h100e", nonnegative=True,
+            code="invalid_observation", status=400
+        ),
+        "available_tpu_hours": _finite_number(
+            payload.get("available_tpu_hours"), "available_tpu_hours", nonnegative=True,
+            code="invalid_observation", status=400
+        ),
+        "used_tpu_hours": _finite_number(
+            payload.get("used_tpu_hours"), "used_tpu_hours", nonnegative=True,
+            code="invalid_observation", status=400
+        ),
+        "active_jobs": _finite_number(
+            payload.get("active_jobs"), "active_jobs", nonnegative=True,
+            code="invalid_observation", status=400
+        ),
+        "active_cost_per_hour": _finite_number(
+            payload.get("active_cost_per_hour"), "active_cost_per_hour", nonnegative=True,
+            code="invalid_observation", status=400
+        ),
+        "active_cost_unit": payload.get("active_cost_unit"),
+        "expires_at": payload.get("expires_at"),
+    }
+    if result["balance_unit"] is not None and (
+        not isinstance(result["balance_unit"], str)
+        or not result["balance_unit"]
+        or len(result["balance_unit"]) > 32
+    ):
+        raise OrchestratorError("invalid_observation", "balance_unit must be a short string")
+    if result["expires_at"] is not None:
+        result["expires_at"] = _iso(
+            _parse_iso(result["expires_at"], "expires_at", code="invalid_observation")
+        )
+    if result["active_cost_unit"] is not None:
+        result["active_cost_unit"] = _short_unit(
+            result["active_cost_unit"], "active_cost_unit", code="invalid_observation", status=400
+        )
+    if not _readable_meter_values(result):
+        raise OrchestratorError("invalid_observation", "Observation contains no meter values")
+    return result
+
+
+def _usage_deltas(
+    previous: dict[str, Any], fresh: dict[str, Any]
+) -> tuple[dict[str, Any], bool]:
+    if previous.get("status") not in {"live", "observed"}:
+        return {}, False
+    deltas: dict[str, Any] = {}
+    changed = False
+    for key in (
         "balance",
         "available_h100e",
         "used_h100e",
         "available_tpu_hours",
         "used_tpu_hours",
         "active_jobs",
-    )
-    if not any(result.get(key) is not None for key in meter_fields):
-        raise OrchestratorError(
-            "invalid_monitor_response", "Usage response contains no readable meter values", status=502
-        )
-    return result
+        "active_cost_per_hour",
+    ):
+        before = previous.get(key)
+        after = fresh.get(key)
+        if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+            delta = float(after) - float(before)
+            deltas[key] = delta
+            if (
+                key in {"balance", "available_h100e", "available_tpu_hours"}
+                and delta < -1e-9
+            ) or (
+                key in {"used_h100e", "used_tpu_hours"} and delta > 1e-9
+            ) or (key in {"active_jobs", "active_cost_per_hour"} and abs(delta) > 1e-9):
+                changed = True
+        elif key in {"active_jobs", "active_cost_per_hour"} and isinstance(
+            after, (int, float)
+        ) and after > 0:
+            changed = True
+    before_expiry = previous.get("expires_at")
+    after_expiry = fresh.get("expires_at")
+    if before_expiry is not None and after_expiry is not None and before_expiry != after_expiry:
+        deltas["expires_at_changed"] = True
+        changed = True
+    previous_meters = {
+        meter["id"]: meter for meter in previous.get("meters", []) if isinstance(meter, dict)
+    }
+    fresh_meters = {
+        meter["id"]: meter for meter in fresh.get("meters", []) if isinstance(meter, dict)
+    }
+    meter_deltas: dict[str, dict[str, Any]] = {}
+    for meter_id in sorted(set(previous_meters) | set(fresh_meters)):
+        before_meter = previous_meters.get(meter_id)
+        after_meter = fresh_meters.get(meter_id)
+        if before_meter is None or after_meter is None:
+            meter_deltas[meter_id] = {"changed": True}
+            changed = True
+            continue
+        if (
+            before_meter.get("kind") != after_meter.get("kind")
+            or before_meter.get("unit") != after_meter.get("unit")
+        ):
+            meter_deltas[meter_id] = {"changed": True}
+            changed = True
+            continue
+        entry: dict[str, Any] = {}
+        for key in ("value", "available", "used"):
+            before_value = before_meter.get(key)
+            after_value = after_meter.get(key)
+            if isinstance(before_value, (int, float)) and isinstance(after_value, (int, float)):
+                delta = float(after_value) - float(before_value)
+                if abs(delta) > 1e-9:
+                    entry[key] = delta
+            elif before_value != after_value:
+                entry[key] = None
+        for key in ("reset_at", "expires_at"):
+            if before_meter.get(key) != after_meter.get(key):
+                entry[f"{key}_changed"] = True
+        if entry:
+            meter_deltas[meter_id] = entry
+            changed = True
+    if meter_deltas:
+        deltas["meters"] = meter_deltas
+    return deltas, changed
 
 
 def _shutdown_rules(raw: Any) -> dict[str, Any]:
@@ -1324,7 +1570,8 @@ def _shutdown_rules(raw: Any) -> dict[str, Any]:
         "duration_minutes": 60,
         "max_jobs": 1,
         "max_h100e": None,
-        "balance_floor": 0,
+        "balance_floor": None,
+        "balance_thresholds": {},
         "idle_minutes": 30,
         "max_errors": 3,
     }
@@ -1333,7 +1580,6 @@ def _shutdown_rules(raw: Any) -> dict[str, Any]:
         "duration_minutes": (1, MAX_ARM_MINUTES),
         "max_jobs": (1, 1000),
         "max_h100e": (0, 1_000_000),
-        "balance_floor": (0, 1_000_000_000),
         "idle_minutes": (1, MAX_ARM_MINUTES),
         "max_errors": (1, 1000),
     }
@@ -1349,6 +1595,32 @@ def _shutdown_rules(raw: Any) -> dict[str, Any]:
             or value > maximum
         ):
             raise OrchestratorError("invalid_arm", f"shutdown.{key} is outside its safe range")
+    legacy_floor = result.get("balance_floor")
+    if legacy_floor is not None and (
+        not isinstance(legacy_floor, (int, float))
+        or isinstance(legacy_floor, bool)
+        or not math.isfinite(float(legacy_floor))
+        or legacy_floor < 0
+        or legacy_floor > 1_000_000_000
+    ):
+        raise OrchestratorError("invalid_arm", "shutdown.balance_floor is outside its safe range")
+    thresholds = result.get("balance_thresholds")
+    if not isinstance(thresholds, dict) or len(thresholds) > 32:
+        raise OrchestratorError("invalid_arm", "shutdown.balance_thresholds must be an account map")
+    normalized_thresholds: dict[str, dict[str, Any]] = {}
+    for account_id, threshold in thresholds.items():
+        if not isinstance(account_id, str) or ID_RE.fullmatch(account_id) is None:
+            raise OrchestratorError("invalid_arm", "shutdown.balance_thresholds has an invalid account id")
+        if not isinstance(threshold, dict) or set(threshold) != {"value", "unit"}:
+            raise OrchestratorError(
+                "invalid_arm", f"shutdown.balance_thresholds.{account_id} needs value and unit"
+            )
+        value = _finite_number(threshold.get("value"), f"shutdown.balance_thresholds.{account_id}.value", nonnegative=True, code="invalid_arm", status=400)
+        normalized_thresholds[account_id] = {
+            "value": value,
+            "unit": _short_unit(threshold.get("unit"), f"shutdown.balance_thresholds.{account_id}.unit", code="invalid_arm", status=400),
+        }
+    result["balance_thresholds"] = normalized_thresholds
     expires_at = result.get("expires_at")
     if expires_at is not None:
         deadline = _parse_iso(expires_at, "shutdown.expires_at")
@@ -1370,6 +1642,8 @@ class OrchestratorState:
         self.runtime_state_path = runtime_state_path
         self.results: dict[str, dict[str, Any]] = {}
         self.usage: dict[str, dict[str, Any]] = {}
+        self.meter_events: list[dict[str, Any]] = []
+        self.meter_sequence = 0
         self.lock = threading.RLock()
         self.dispatch_gate = threading.Lock()
         self.monitor_stop = threading.Event()
@@ -1454,7 +1728,7 @@ class OrchestratorState:
             raise OrchestratorError(
                 "invalid_runtime_state", "Runtime state is unreadable; dispatch remains disabled"
             ) from exc
-        if not isinstance(payload, dict) or payload.get("schema_version") not in {1, 2}:
+        if not isinstance(payload, dict) or payload.get("schema_version") not in {1, 2, 3}:
             raise OrchestratorError(
                 "invalid_runtime_state", "Runtime state has an unsupported schema"
             )
@@ -1471,12 +1745,14 @@ class OrchestratorState:
             "next_poll_at",
             "balance",
             "balance_unit",
+            "meters",
             "available_h100e",
             "used_h100e",
             "available_tpu_hours",
             "used_tpu_hours",
             "active_jobs",
             "active_cost_per_hour",
+            "active_cost_unit",
             "expires_at",
             "external_activity_detected",
             "deltas",
@@ -1496,7 +1772,7 @@ class OrchestratorState:
                 raise OrchestratorError(
                     "invalid_runtime_state", "Runtime usage contains unsupported fields"
                 )
-            if snapshot.get("status") not in {None, "live", "error"}:
+            if snapshot.get("status") not in {None, "live", "observed", "error"}:
                 raise OrchestratorError("invalid_runtime_state", "Runtime usage status is invalid")
             for field in (
                 "balance",
@@ -1516,6 +1792,12 @@ class OrchestratorState:
                     raise OrchestratorError(
                         "invalid_runtime_state", "Runtime usage contains an invalid meter value"
                     )
+            _canonical_meters(
+                snapshot.get("meters"), code="invalid_runtime_state", status=503
+            )
+            for field in ("balance_unit", "active_cost_unit"):
+                if snapshot.get(field) is not None:
+                    _short_unit(snapshot[field], field, code="invalid_runtime_state", status=503)
             if not isinstance(snapshot.get("deltas", {}), dict):
                 raise OrchestratorError("invalid_runtime_state", "Runtime usage deltas are invalid")
             generation = snapshot.get("_dispatch_generation", 0)
@@ -1531,6 +1813,43 @@ class OrchestratorState:
             self.dispatch_generation = max(self.dispatch_generation, generation)
         if payload.get("schema_version") == 1:
             return
+        events = payload.get("meter_events", [])
+        if not isinstance(events, list) or len(events) > MAX_METER_EVENTS:
+            raise OrchestratorError(
+                "invalid_runtime_state", "Runtime meter event history is invalid or exceeds its limit"
+            )
+        allowed_event_keys = OBSERVATION_FIELDS | {
+            "event_id",
+            "provider",
+            "status",
+            "external_activity_detected",
+            "deltas",
+        }
+        for event in events:
+            if not isinstance(event, dict) or set(event) - allowed_event_keys:
+                raise OrchestratorError(
+                    "invalid_runtime_state", "Runtime meter event contains unsupported fields"
+                )
+            event_id = event.get("event_id")
+            account_id = event.get("account_id")
+            if (
+                not isinstance(event_id, int)
+                or isinstance(event_id, bool)
+                or event_id <= self.meter_sequence
+                or account_id not in accounts
+                or event.get("status") not in {"observed", "live"}
+                or event.get("source") not in {"manual", "browser", "cli", "monitor"}
+                or not isinstance(event.get("deltas", {}), dict)
+                or not isinstance(event.get("external_activity_detected"), bool)
+            ):
+                raise OrchestratorError(
+                    "invalid_runtime_state", "Runtime meter event is invalid or out of order"
+                )
+            _parse_iso(
+                event.get("observed_at"), "meter_event.observed_at", code="invalid_runtime_state"
+            )
+            self.meter_events.append(_redact_secrets(event))
+            self.meter_sequence = event_id
         entries = payload.get("idempotency", [])
         if not isinstance(entries, list):
             raise OrchestratorError(
@@ -1668,10 +1987,11 @@ class OrchestratorState:
                 "Active idempotency tombstone limit reached; entries expire after 30 days",
             )
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
             "saved_at": _iso(),
             "restart_behavior": "always_disarmed",
             "usage": _redact_secrets(self.usage),
+            "meter_events": _redact_secrets(self.meter_events),
             "idempotency": entries,
         }
         path = self.runtime_state_path
@@ -1710,14 +2030,19 @@ class OrchestratorState:
         ):
             reason = "armed session idled out"
         if reason is None:
-            floor = float(rules["balance_floor"])
+            thresholds = rules.get("balance_thresholds", {})
             for account_id in self.arm_state["providers"]:
                 snapshot = self.usage.get(account_id, {})
                 balance = snapshot.get("balance")
                 available = snapshot.get("available_h100e")
-                if isinstance(balance, (int, float)) and balance < floor:
-                    reason = f"{account_id} balance fell below the armed floor"
-                    break
+                threshold = thresholds.get(account_id)
+                if isinstance(threshold, dict) and isinstance(balance, (int, float)):
+                    if snapshot.get("balance_unit") != threshold.get("unit"):
+                        reason = f"{account_id} monitored balance unit does not match its armed threshold"
+                        break
+                    if balance < threshold["value"]:
+                        reason = f"{account_id} balance fell below the armed threshold"
+                        break
                 if isinstance(available, (int, float)) and available <= 0:
                     reason = f"{account_id} has no monitored H100e available"
                     break
@@ -1851,6 +2176,27 @@ class OrchestratorState:
             if record.get("status") == "credit_consuming":
                 warnings.append(f"{storage_id} consumes an armed provider credit balance")
         shutdown = _shutdown_rules(request.get("shutdown"))
+        thresholds = shutdown["balance_thresholds"]
+        if any(account_id not in providers for account_id in thresholds):
+            raise OrchestratorError(
+                "invalid_arm", "balance thresholds must target an armed account"
+            )
+        for account_id, threshold in thresholds.items():
+            if accounts[account_id].get("balance_unit") != threshold["unit"]:
+                raise OrchestratorError(
+                    "invalid_arm", f"balance threshold unit does not match {account_id} catalog balance"
+                )
+        if shutdown.get("balance_floor") is not None:
+            if len(providers) != 1 or providers[0] in thresholds:
+                raise OrchestratorError(
+                    "invalid_arm", "legacy balance_floor requires one armed account and no balance_thresholds"
+                )
+            account_id = providers[0]
+            if accounts[account_id].get("balance_unit") != "USD":
+                raise OrchestratorError(
+                    "invalid_arm", "legacy balance_floor is only compatible with an explicit USD account balance"
+                )
+            thresholds[account_id] = {"value": shutdown["balance_floor"], "unit": "USD"}
         with self.dispatch_gate, self.lock:
             fresh_reasons = _catalog_freshness_reasons(self.catalog)
             for account_id in providers:
@@ -1954,6 +2300,12 @@ class OrchestratorState:
             try:
                 fresh = _poll_usage_profile(profile)
                 account = self._accounts().get(account_id, {})
+                if (
+                    fresh.get("active_cost_per_hour") is not None
+                    and fresh.get("active_cost_unit") is None
+                    and account.get("balance_unit") == "USD"
+                ):
+                    fresh["active_cost_unit"] = "USD"
                 account_traits = _traits_for_account(account, self.catalog)
                 supports_cuda = any("cuda" in item["backends"] for item in account_traits)
                 if not supports_cuda:
@@ -1967,27 +2319,7 @@ class OrchestratorState:
                         continue
                     completed_at = _utc_now()
                     previous = self.usage.get(account_id, {})
-                    deltas: dict[str, Any] = {}
-                    changed = False
-                    for key in (
-                        "balance",
-                        "available_h100e",
-                        "used_h100e",
-                        "available_tpu_hours",
-                        "used_tpu_hours",
-                    ):
-                        before = previous.get(key)
-                        after = fresh.get(key)
-                        if isinstance(before, (int, float)) and isinstance(after, (int, float)):
-                            delta = float(after) - float(before)
-                            deltas[key] = delta
-                            if (
-                                key in {"balance", "available_h100e", "available_tpu_hours"}
-                                and delta < -1e-9
-                            ) or (
-                                key in {"used_h100e", "used_tpu_hours"} and delta > 1e-9
-                            ):
-                                changed = True
+                    deltas, changed = _usage_deltas(previous, fresh)
                     external = bool(
                         changed
                         and previous.get("_dispatch_generation", self.dispatch_generation)
@@ -2011,6 +2343,36 @@ class OrchestratorState:
                         }
                     )
                     self.usage[account_id] = fresh
+                    if len(self.meter_events) >= MAX_METER_EVENTS:
+                        raise OrchestratorError(
+                            "runtime_state_full",
+                            "Meter event limit reached; export and rotate runtime state before refreshing",
+                            status=507,
+                        )
+                    self.meter_sequence += 1
+                    self.meter_events.append(
+                        {
+                            "event_id": self.meter_sequence,
+                            "account_id": account_id,
+                            "provider": account.get("provider"),
+                            "source": "monitor",
+                            "status": "live",
+                            "observed_at": fresh["observed_at"],
+                            "balance": fresh.get("balance"),
+                            "balance_unit": fresh.get("balance_unit"),
+                            "meters": fresh.get("meters", []),
+                            "available_h100e": fresh.get("available_h100e"),
+                            "used_h100e": fresh.get("used_h100e"),
+                            "available_tpu_hours": fresh.get("available_tpu_hours"),
+                            "used_tpu_hours": fresh.get("used_tpu_hours"),
+                            "active_jobs": fresh.get("active_jobs"),
+                            "active_cost_per_hour": fresh.get("active_cost_per_hour"),
+                            "active_cost_unit": fresh.get("active_cost_unit"),
+                            "expires_at": fresh.get("expires_at"),
+                            "external_activity_detected": external,
+                            "deltas": deltas,
+                        }
+                    )
                     used_delta = deltas.get("used_h100e")
                     if (
                         self.arm_state.get("armed") is True
@@ -2056,6 +2418,82 @@ class OrchestratorState:
             self._save_runtime_state()
         return self.usage_view()
 
+    def observe_usage(self, payload: Any) -> dict[str, Any]:
+        observation = _canonical_observation(payload)
+        account_id = observation["account_id"]
+        account = self._accounts().get(account_id)
+        if account is None:
+            raise OrchestratorError("invalid_observation", f"Unknown account: {account_id}")
+        if (
+            observation.get("active_cost_per_hour") is not None
+            and observation.get("active_cost_unit") is None
+            and account.get("balance_unit") == "USD"
+        ):
+            observation["active_cost_unit"] = "USD"
+        supports_cuda = any(
+            "cuda" in item["backends"] for item in _traits_for_account(account, self.catalog)
+        )
+        if not supports_cuda:
+            observation["available_h100e"] = None
+            observation["used_h100e"] = None
+        with self.lock:
+            if len(self.meter_events) >= MAX_METER_EVENTS:
+                raise OrchestratorError(
+                    "runtime_state_full",
+                    "Meter event limit reached; export and rotate runtime state before recording more",
+                    status=507,
+                )
+            previous = self.usage.get(account_id, {})
+            fresh = {
+                key: value
+                for key, value in observation.items()
+                if key not in {"account_id", "source"}
+            }
+            deltas, changed = _usage_deltas(previous, fresh)
+            external = bool(
+                changed
+                and previous.get("_dispatch_generation", self.dispatch_generation)
+                == self.dispatch_generation
+            )
+            snapshot = {
+                **fresh,
+                "account_id": account_id,
+                "provider": account.get("provider"),
+                "profile_id": None,
+                "status": "observed",
+                "next_poll_at": previous.get("next_poll_at"),
+                "external_activity_detected": external,
+                "deltas": deltas,
+                "error": None,
+                "consecutive_errors": 0,
+                "_dispatch_generation": self.dispatch_generation,
+            }
+            self.meter_sequence += 1
+            event = {
+                **observation,
+                "event_id": self.meter_sequence,
+                "provider": account.get("provider"),
+                "status": "observed",
+                "external_activity_detected": external,
+                "deltas": deltas,
+            }
+            preserve_live = previous.get("status") == "live"
+            if not preserve_live:
+                self.usage[account_id] = snapshot
+            self.meter_events.append(event)
+            try:
+                self._evaluate_arm()
+                self._save_runtime_state()
+            except OrchestratorError:
+                self.meter_events.pop()
+                self.meter_sequence -= 1
+                if previous:
+                    self.usage[account_id] = previous
+                else:
+                    self.usage.pop(account_id, None)
+                raise
+            return self.usage_view()
+
     def usage_view(self) -> dict[str, Any]:
         accounts = self._accounts()
         monitored = {
@@ -2087,19 +2525,38 @@ class OrchestratorState:
                     "next_poll_at": None,
                     "balance": account.get("balance"),
                     "balance_unit": account.get("balance_unit"),
+                    "meters": [],
                     "available_h100e": account.get("acquired_h100e_hours") if supports_cuda else None,
                     "used_h100e": usage.get("used_h100e"),
                     "available_tpu_hours": usage.get("available_tpu_hours"),
                     "used_tpu_hours": usage.get("used_tpu_hours"),
-                    "active_jobs": None,
-                    "active_cost_per_hour": None,
-                    "expires_at": None,
+                    "active_jobs": usage.get("active_jobs"),
+                    "active_cost_per_hour": usage.get("active_cost_per_hour"),
+                    "active_cost_unit": None,
+                    "expires_at": usage.get("expires_at"),
                     "external_activity_detected": False,
                     "deltas": {},
                     "error": None,
                 }
             rows.append(row)
         profiles = self._monitor_profiles()
+        gaps = []
+        for account_id, account in accounts.items():
+            profile = monitored.get(account_id)
+            config = _monitor_config(profile) if profile is not None else None
+            if profile is None:
+                reason = "no usage monitor configured"
+            elif config is None or config.get("enabled") is not True:
+                reason = "usage monitor is disabled"
+            else:
+                continue
+            gaps.append(
+                {
+                    "account_id": account_id,
+                    "provider": account.get("provider"),
+                    "reason": reason,
+                }
+            )
         return {
             "as_of": _iso(),
             "monitoring": {
@@ -2110,8 +2567,10 @@ class OrchestratorState:
                     for profile in profiles
                     if (_monitor_config(profile) or {}).get("enabled") is True
                 ),
+                "gaps": gaps,
             },
             "accounts": rows,
+            "meter_events": json.loads(canonical_json(self.meter_events)),
         }
 
     def _dispatch_monitor_reasons(
@@ -2139,15 +2598,7 @@ class OrchestratorState:
         allowed_age = min(max(interval * 2, MIN_MONITOR_SECONDS), MAX_MONITOR_AGE_SECONDS)
         if age_seconds < -60 or age_seconds > allowed_age:
             return ["usage monitor snapshot is stale or future-dated"]
-        meter_fields = (
-            "balance",
-            "available_h100e",
-            "used_h100e",
-            "available_tpu_hours",
-            "used_tpu_hours",
-            "active_jobs",
-        )
-        if not any(snapshot.get(key) is not None for key in meter_fields):
+        if not _readable_meter_values(snapshot):
             return ["usage monitor snapshot contains no readable meter values"]
         return []
 
@@ -2635,6 +3086,13 @@ def _parse_host_header(value: Any) -> tuple[str, int | None]:
 
 
 def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
+    static_cache: dict[str, tuple[bytes, str]] = {}
+    for route, relative in STATIC_FILES.items():
+        path = (ROOT / relative).resolve()
+        if path.is_file():
+            content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            static_cache[route] = (path.read_bytes(), content_type)
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "FreeComputeApp/0.2"
 
@@ -2694,6 +3152,16 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
 
         def _send_file(self) -> bool:
             route = urlsplit(self.path).path
+            cached = static_cache.get(route)
+            if cached is not None:
+                body, content_type = cached
+                self.send_response(200)
+                self.send_header("Content-Type", content_type + ("; charset=utf-8" if content_type.startswith("text/") or content_type == "application/javascript" else ""))
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return True
             relative = STATIC_FILES.get(route)
             if relative is None and route.startswith("/docs/"):
                 candidate = route.removeprefix("/")
@@ -2739,12 +3207,23 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
             except (UnicodeDecodeError, ValueError) as exc:
                 raise OrchestratorError("invalid_json", "Request body is not valid JSON") from exc
 
+        def _discard_rejected_body(self) -> None:
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None:
+                return
+            try:
+                length = int(raw_length)
+            except ValueError:
+                return
+            if 0 <= length <= MAX_BODY_BYTES:
+                self.rfile.read(length)
+
         def do_GET(self) -> None:
             try:
                 self._validate_request_context()
                 route = urlsplit(self.path).path
                 if route == "/health":
-                    self._send(200, {"status": "ok", "service": "free-compute-app", "version": 1})
+                    self._send(200, {"status": "ok", "service": "free-compute-app", "version": 2})
                 elif route == "/v1/ledger":
                     self._send(200, {"summary": ledger_summary(state.catalog), "catalog": state.catalog})
                 elif route == "/v1/storage":
@@ -2768,6 +3247,11 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             try:
                 self._validate_request_context()
+            except OrchestratorError as exc:
+                self._discard_rejected_body()
+                self._send(exc.status, {"error": {"code": exc.code, "message": str(exc)}})
+                return
+            try:
                 body = self._body()
                 route = urlsplit(self.path).path
                 if route == "/v1/plan":
@@ -2782,6 +3266,8 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
                 elif route == "/v1/usage/refresh":
                     account_ids = body.get("account_ids") if isinstance(body, dict) else None
                     self._send(200, state.refresh_usage(account_ids))
+                elif route == "/v1/usage/observe":
+                    self._send(200, state.observe_usage(body))
                 elif route == "/v1/arm":
                     self._send(200, state.arm(body))
                 elif route == "/v1/arm/auto":
@@ -2858,6 +3344,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         catalog = read_json(args.catalog)
         profiles = load_profiles(args.profiles)
+        if args.command == "serve":
+            errors, _warnings = validate_catalog(catalog, _local_today())
+            if errors:
+                raise OrchestratorError(
+                    "invalid_catalog",
+                    "Public catalog validation failed; local service was not started: "
+                    + "; ".join(errors[:10]),
+                    status=503,
+                )
         state = OrchestratorState(
             catalog,
             profiles,

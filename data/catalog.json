@@ -1,6 +1,9 @@
 {
   "schema_version": 1,
-  "as_of": "2026-08-11",
+  "as_of": "2026-08-12",
+  "safe_balance_snapshot_as_of": "2026-08-11",
+  "research_retrieved_as_of": "2026-08-12",
+  "usage_observed_as_of": "2026-08-12",
   "owner": {
     "identity": "redacted",
     "app_scope": "Legitimate free compute only"
@@ -27,7 +30,7 @@
         "acquired_accounts": 0
       },
       "web_research": {
-        "offers_cataloged": 48,
+        "offers_cataloged": 52,
         "acquired_accounts": 0
       },
       "daily_automation": {
@@ -87,6 +90,21 @@
       "safe_accounts": 6,
       "accounts_acquired_this_project": 2,
       "notes": "Read-only account inspection confirmed 6.43 H100 PCIe hours on an externally launched Lambda workload. This is actual usage, but it is payment-risk account activity and is not consumption from the safely acquired pool; Free Compute did not launch or modify it."
+    },
+    {
+      "observed_on": "2026-08-12",
+      "event": "external_activity_user_confirmed",
+      "acquired_h100e_available": 50.43,
+      "acquired_usd_value": 165.91,
+      "confirmed_offer_h100e_potential": 44.39,
+      "discovered_h100e_potential": 64123.72,
+      "used_h100e_since_tracking": 6.43,
+      "used_h100e_external": 6.43,
+      "used_h100e_safe_acquired": 0,
+      "cataloged_offers": 52,
+      "safe_accounts": 6,
+      "accounts_acquired_this_project": 2,
+      "notes": "The account owner confirmed that a Lambda node is actively spending credits. Exact current balance, runtime, and cost remain unknown pending a fresh read-only meter observation; no safely acquired totals were changed. Hyperbolic use was planned for later today but is not recorded as active without observation."
     }
   ],
   "normalization": {
@@ -274,8 +292,8 @@
         }
       ],
       "docs": "docs/provider-usage.md#lambda-cloud",
-      "evidence": "Live Billing verified 2026-08-11: $33.52 service credit was shown, but the dashboard says the default card is charged after credits are used or expire. A later read-only check confirmed one externally launched H100 PCIe instance running; August usage showed $22.89 total, including 6.43 hours and $21.13 on the current H100 PCIe line at $3.29/hour.",
-      "next_action": "Monitor the existing external workload read-only and do not stop or modify it. Do not launch another instance through Free Compute; first blocker is provider-enforced removal of paid fallback or a separate hard spending stop."
+      "evidence": "Live Billing verified 2026-08-11: $33.52 service credit was shown, but the dashboard says the default card is charged after credits are used or expire. A later read-only check confirmed one externally launched H100 PCIe instance running; August usage showed $22.89 total, including 6.43 hours and $21.13 on the current H100 PCIe line at $3.29/hour. On 2026-08-12 the account owner confirmed a Lambda node was still active and spending credits; exact current balance, runtime, and cost were not supplied.",
+      "next_action": "Refresh the live balance and workload meter read-only. Do not stop or modify the owner-controlled node and do not launch another instance through Free Compute; first blocker is provider-enforced removal of paid fallback or a separate hard spending stop."
     },
     {
       "id": "acct-modal",
@@ -3610,6 +3628,237 @@
         {
           "url": "https://docs.csc.fi/support/tutorials/gpu-ml/",
           "verified_on": "2026-08-11"
+        }
+      ]
+    },
+    {
+      "id": "amd-ai-hpc-cluster",
+      "provider": "AMD",
+      "title": "AI & HPC Cluster grant",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Free approved cluster access for up to one year by proposal; quarterly review and award size is project-dependent",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Non-profit research organization or academic institution with a defined AI/HPC project and requested duration",
+      "hardware": {
+        "gpu_models": [
+          "AMD Instinct MI325X",
+          "AMD Instinct MI300X",
+          "AMD Instinct MI250",
+          "AMD Instinct MI210"
+        ],
+        "best_gpu": "AMD Instinct MI325X",
+        "memory_per_unit_gb_min": 64,
+        "memory_per_unit_gb_max": 256,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "research_cluster",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "rocm"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "An approved institutional research team can share the allocation; quarterly review and publication reporting apply."
+      },
+      "next_action": "Identify a truthful academic or nonprofit project and submit a bounded proposal; do not confuse this grant with the card-required AMD Developer Cloud credit route.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.amd.com/en/developer/resources/cloud-access.html",
+          "verified_on": "2026-08-12"
+        },
+        {
+          "url": "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html",
+          "verified_on": "2026-08-12"
+        }
+      ]
+    },
+    {
+      "id": "swiss-ai-compute-grants",
+      "provider": "Swiss AI Initiative / CSCS Alps",
+      "title": "Open-science GH200 compute grants",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "Rolling small calls up to 32,000 GPU-hours and twice-yearly large calls above 500,000 GPU-hours; 10-20 million GPU-hours are planned for distribution across 2026 awards",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Frontier foundation-model research producing open-science artifacts; calls are open to researchers in Europe and beyond",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA GH200 H100"
+        ],
+        "best_gpu": "NVIDIA GH200 H100",
+        "memory_per_unit_gb_min": 96,
+        "memory_per_unit_gb_max": 96,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": true,
+        "constraints": "Awards support approved collaborative projects and open outputs; the program-wide 2026 pool is not a per-project entitlement."
+      },
+      "next_action": "Choose the rolling small-project route or prepare a large open-science proposal before the current September 14, 2026 large-call deadline.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.swiss-ai.org/compute-grants",
+          "verified_on": "2026-08-12"
+        },
+        {
+          "url": "https://www.swiss-ai.org/",
+          "verified_on": "2026-08-12"
+        }
+      ]
+    },
+    {
+      "id": "access-aces-h100",
+      "provider": "ACCESS-CI / Texas A&M ACES",
+      "title": "ACES accelerator allocation",
+      "kind": "gpu_hpc_grant",
+      "status": "grant_application",
+      "allowance": "No-cost ACCESS allocation sized by the approved request; ACES exposes H100 accelerators through a dynamically composed pool",
+      "recurrence": "project_term",
+      "payment_method": "not_required",
+      "hard_stop": true,
+      "interruptibility": "unknown",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Eligible U.S.-based researcher or educator with an approved ACCESS project and justified accelerator request",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100",
+          "NVIDIA Grace Hopper"
+        ],
+        "best_gpu": "NVIDIA Grace Hopper H100",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 96,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "slurm_hpc_ssh",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "batch",
+          "distributed",
+          "hpc",
+          "cuda"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "team_allocation",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "ACCESS project membership and ACES scheduler policy govern team use; accelerator availability is dynamic."
+      },
+      "next_action": "Confirm ACCESS eligibility and request only a justified ACES accelerator allocation; do not infer a fixed H100 count from the composable pool.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://allocations.access-ci.org/",
+          "verified_on": "2026-08-12"
+        },
+        {
+          "url": "https://support.access-ci.org/documentation/resources/aces-0",
+          "verified_on": "2026-08-12"
+        }
+      ]
+    },
+    {
+      "id": "nvidia-inception-dgx-cloud",
+      "provider": "NVIDIA Inception / DGX Cloud",
+      "title": "Qualified startup H100 credits",
+      "kind": "gpu_cloud_grant",
+      "status": "grant_application",
+      "allowance": "Qualified Inception members may receive up to $100,000 in DGX Cloud credits for dedicated H100 capacity",
+      "recurrence": "project_term",
+      "payment_method": "unknown",
+      "hard_stop": null,
+      "interruptibility": "non_interruptible",
+      "priority": 1,
+      "acquisition_origin": "found_this_project",
+      "eligibility": "Qualified NVIDIA Inception startup member; award and exact billing isolation are discretionary",
+      "hardware": {
+        "gpu_models": [
+          "NVIDIA H100"
+        ],
+        "best_gpu": "NVIDIA H100 80 GB",
+        "memory_per_unit_gb_min": 80,
+        "memory_per_unit_gb_max": 80,
+        "unit_count_max": null,
+        "compute_class": "frontier"
+      },
+      "usability": {
+        "access_mode": "dgx_cloud_workspace",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "containers",
+          "distributed",
+          "cuda"
+        ],
+        "usable_now": false
+      },
+      "poolability": {
+        "suitability": "good",
+        "mechanism": "organization_workspace",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "A startup workspace can centralize approved workloads, but payment requirements, expiry, and hard-stop behavior must be verified before use."
+      },
+      "next_action": "Verify truthful startup eligibility and current benefit terms; do not activate or count credits until a no-card, no-overage hard stop is proved.",
+      "normalized_potential": null,
+      "sources": [
+        {
+          "url": "https://www.nvidia.com/en-us/data-center/gpu-cloud-computing/partners/",
+          "verified_on": "2026-08-12"
+        },
+        {
+          "url": "https://blogs.nvidia.com/blog/nvidia-keynote-at-gtc-2025-ai-news-live-updates/",
+          "verified_on": "2026-08-12"
         }
       ]
     }

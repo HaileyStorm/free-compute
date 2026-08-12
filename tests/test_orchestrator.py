@@ -18,10 +18,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from orchestrator import (
     MAX_BODY_BYTES,
+    MAX_METER_EVENTS,
     OrchestratorError,
     OrchestratorState,
     canonical_json,
     ledger_summary,
+    load_profiles,
     make_handler,
     plan_job,
     public_profile_summary,
@@ -505,6 +507,152 @@ class OrchestratorTests(unittest.TestCase):
             state.refresh_usage()
         self.assertFalse(state.arm_view()["armed"])
         self.assertEqual("maximum armed errors reached", state.arm_view()["reason"])
+
+    def test_usage_monitor_detects_active_job_cost_and_expiry_changes(self):
+        profiles = {
+            "monitored": command_profile(
+                "monitored",
+                {
+                    "enabled": True,
+                    "adapter": "command_json",
+                    "command": ["usage", "--json"],
+                    "poll_interval_seconds": 60,
+                },
+            )
+        }
+        state = OrchestratorState(fixture_catalog(), profiles)
+        snapshots = [
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"active_jobs":0,"active_cost_per_hour":0,"expires_at":"2026-09-01T00:00:00Z"}',
+                stderr="",
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"active_jobs":1,"active_cost_per_hour":3.29,"expires_at":"2026-09-02T00:00:00Z"}',
+                stderr="",
+            ),
+        ]
+        with mock.patch("orchestrator.subprocess.run", side_effect=snapshots):
+            state.refresh_usage()
+            state.refresh_usage()
+        row = state.usage_view()["accounts"][0]
+        self.assertTrue(row["external_activity_detected"])
+        self.assertEqual(1, row["deltas"]["active_jobs"])
+        self.assertEqual(3.29, row["deltas"]["active_cost_per_hour"])
+        self.assertTrue(row["deltas"]["expires_at_changed"])
+        self.assertEqual("monitor", state.usage_view()["meter_events"][-1]["source"])
+        self.assertEqual("live", state.usage_view()["meter_events"][-1]["status"])
+
+    def test_live_and_manual_meter_validation_use_distinct_error_codes(self):
+        monitor = {
+            "enabled": True,
+            "adapter": "command_json",
+            "command": ["usage-meter"],
+            "poll_interval_seconds": 60,
+        }
+        state = OrchestratorState(
+            fixture_catalog(), {"monitored": command_profile("monitored", monitor)}
+        )
+        invalid = SimpleNamespace(returncode=0, stdout='{"available_h100e":-1}', stderr="")
+        with mock.patch("orchestrator.subprocess.run", return_value=invalid):
+            result = state.refresh_usage()
+        row = result["accounts"][0]
+        self.assertEqual("invalid_monitor_response", row["error"]["code"])
+
+        with self.assertRaises(OrchestratorError) as caught:
+            state.observe_usage({"account_id": "safe-account", "balance": float("nan")})
+        self.assertEqual("invalid_observation", caught.exception.code)
+        self.assertEqual(400, caught.exception.status)
+
+    def test_manual_observation_is_persisted_but_never_monitor_authority(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.json"
+            profile = command_profile(
+                "monitored",
+                {
+                    "enabled": True,
+                    "adapter": "command_json",
+                    "command": ["usage", "--json"],
+                    "poll_interval_seconds": 60,
+                },
+            )
+            state = OrchestratorState(fixture_catalog(), {"monitored": profile}, path)
+            result = state.observe_usage(
+                {
+                    "account_id": "safe-account",
+                    "source": "browser",
+                    "balance": 28.0,
+                    "balance_unit": "USD",
+                    "active_jobs": 1,
+                    "active_cost_per_hour": 3.29,
+                }
+            )
+            row = result["accounts"][0]
+            self.assertEqual("observed", row["status"])
+            self.assertFalse(row["external_activity_detected"])
+            self.assertEqual(1, result["meter_events"][0]["event_id"])
+            self.assertTrue(
+                any(
+                    "successful live snapshot" in reason
+                    for reason in state._dispatch_monitor_reasons(profile, "safe-account")
+                )
+            )
+
+            restarted = OrchestratorState(fixture_catalog(), {"monitored": profile}, path)
+            self.assertEqual("observed", restarted.usage["safe-account"]["status"])
+            self.assertEqual(1, restarted.meter_events[0]["event_id"])
+            self.assertNotIn("auth", canonical_json(restarted.usage_view()))
+
+    def test_manual_observation_does_not_replace_authoritative_live_snapshot(self):
+        profile = command_profile(
+            "monitored",
+            {
+                "enabled": True,
+                "adapter": "command_json",
+                "command": ["usage-meter"],
+                "poll_interval_seconds": 60,
+            },
+        )
+        state = OrchestratorState(fixture_catalog(), {"monitored": profile})
+        live = SimpleNamespace(
+            returncode=0,
+            stdout='{"balance":30,"active_jobs":0,"available_h100e":9}',
+            stderr="",
+        )
+        with mock.patch("orchestrator.subprocess.run", return_value=live):
+            state.refresh_usage()
+        authoritative = copy.deepcopy(state.usage["safe-account"])
+        result = state.observe_usage(
+            {"account_id": "safe-account", "source": "manual", "balance": 29, "active_jobs": 1}
+        )
+        self.assertEqual(authoritative, state.usage["safe-account"])
+        self.assertEqual("live", result["accounts"][0]["status"])
+        self.assertEqual("observed", result["meter_events"][-1]["status"])
+        self.assertEqual([], state._dispatch_monitor_reasons(profile, "safe-account"))
+
+    def test_catalog_fallback_surfaces_user_confirmed_active_jobs(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][1]["usage"] = {
+            "observed_on": catalog["as_of"],
+            "active_jobs": 1,
+            "active_cost_per_hour": 3.29,
+        }
+        row = OrchestratorState(catalog, {}).usage_view()["accounts"][1]
+        self.assertEqual(1, row["active_jobs"])
+        self.assertEqual(3.29, row["active_cost_per_hour"])
+
+    def test_manual_observation_rejects_unknown_accounts_fields_and_full_history(self):
+        state = OrchestratorState(fixture_catalog(), {})
+        with self.assertRaisesRegex(OrchestratorError, "Unknown account"):
+            state.observe_usage({"account_id": "missing", "balance": 1})
+        with self.assertRaisesRegex(OrchestratorError, "unsupported fields"):
+            state.observe_usage(
+                {"account_id": "safe-account", "balance": 1, "api_key": "must-not-persist"}
+            )
+        state.meter_events = [{} for _ in range(MAX_METER_EVENTS)]
+        with self.assertRaisesRegex(OrchestratorError, "event limit"):
+            state.observe_usage({"account_id": "safe-account", "balance": 1})
 
     def test_concurrent_identical_usage_polls_apply_the_delta_once(self):
         monitor = {
@@ -1260,6 +1408,76 @@ class OrchestratorTests(unittest.TestCase):
         self.assertNotIn("env-only", canonical_json(env_result))
 
 
+    def test_generic_meters_cost_only_and_first_poll_are_noncausal_baseline(self):
+        monitor = {
+            "enabled": True,
+            "adapter": "command_json",
+            "command": ["usage", "--json"],
+            "poll_interval_seconds": 60,
+        }
+        catalog = fixture_catalog()
+        catalog["accounts"][0]["balance_unit"] = "USD"
+        state = OrchestratorState(catalog, {"monitored": command_profile("monitored", monitor)})
+        snapshots = [
+            SimpleNamespace(returncode=0, stdout=json.dumps({
+                "meters": [{"id": "quota", "kind": "requests", "available": 3, "unit": "requests", "reset_at": "2026-09-01T00:00:00Z"}],
+                "active_cost_per_hour": 3.29,
+            }), stderr=""),
+            SimpleNamespace(returncode=0, stdout=json.dumps({
+                "meters": [{"id": "quota", "kind": "requests", "available": 2, "unit": "requests", "reset_at": "2026-09-02T00:00:00Z"}],
+                "active_cost_per_hour": 3.29,
+            }), stderr=""),
+        ]
+        with mock.patch("orchestrator.subprocess.run", side_effect=snapshots):
+            state.refresh_usage()
+        row = state.usage_view()["accounts"][0]
+        self.assertEqual("USD", row["active_cost_unit"])
+        self.assertEqual("quota", row["meters"][0]["id"])
+        self.assertFalse(row["external_activity_detected"])
+        self.assertEqual({}, row["deltas"])
+        with mock.patch("orchestrator.subprocess.run", side_effect=snapshots[1:]):
+            state.refresh_usage()
+        row = state.usage_view()["accounts"][0]
+        self.assertTrue(row["external_activity_detected"])
+        self.assertEqual(-1, row["deltas"]["meters"]["quota"]["available"])
+        self.assertTrue(row["deltas"]["meters"]["quota"]["reset_at_changed"])
+
+    def test_monitor_rejects_empty_or_invalid_balance_unit_and_runtime_rejects_it(self):
+        monitor = {"enabled": True, "adapter": "command_json", "command": ["usage"], "poll_interval_seconds": 60}
+        state = OrchestratorState(fixture_catalog(), {"monitored": command_profile("monitored", monitor)})
+        bad = SimpleNamespace(returncode=0, stdout='{"balance":1,"balance_unit":""}', stderr="")
+        with mock.patch("orchestrator.subprocess.run", return_value=bad):
+            self.assertEqual("invalid_monitor_response", state.refresh_usage()["accounts"][0]["error"]["code"])
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.json"
+            path.write_text(json.dumps({"schema_version": 3, "usage": {"safe-account": {"balance": 1, "balance_unit": "", "deltas": {}, "_dispatch_generation": 0}}, "meter_events": [], "idempotency": []}), encoding="utf-8")
+            with self.assertRaises(OrchestratorError):
+                OrchestratorState(fixture_catalog(), {}, path)
+
+    def test_enabled_usage_monitor_is_unique_per_account(self):
+        profile = command_profile("one", {"enabled": True, "adapter": "command_json", "command": ["usage"], "poll_interval_seconds": 60})
+        duplicate = {**profile, "id": "two"}
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "profiles.json"
+            path.write_text(json.dumps({"profiles": [profile, duplicate]}), encoding="utf-8")
+            with self.assertRaises(OrchestratorError) as caught:
+                load_profiles(path)
+        self.assertEqual("invalid_config", caught.exception.code)
+
+    def test_balance_thresholds_are_account_and_unit_bound(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0]["balance"] = 10
+        catalog["accounts"][0]["balance_unit"] = "credits"
+        state = OrchestratorState(catalog, {})
+        with self.assertRaises(OrchestratorError):
+            state.arm({"providers": ["safe-account"], "shutdown": {"balance_floor": 1}})
+        armed = state.arm({
+            "providers": ["safe-account"],
+            "shutdown": {"balance_thresholds": {"safe-account": {"value": 1, "unit": "credits"}}},
+        })
+        self.assertEqual("credits", armed["shutdown"]["balance_thresholds"]["safe-account"]["unit"])
+
+
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1302,6 +1520,8 @@ class ApiTests(unittest.TestCase):
         status, body = self.request("GET", "/health")
         self.assertEqual(200, status)
         self.assertEqual("ok", body["status"])
+        self.assertEqual("free-compute-app", body["service"])
+        self.assertEqual(2, body["version"])
 
     def test_loopback_host_and_origin_controls_reject_cross_site_requests(self):
         status, body = self.request("GET", "/health", headers={"Host": "evil.example"})
@@ -1343,6 +1563,40 @@ class ApiTests(unittest.TestCase):
             "auth",
         ):
             self.assertNotIn(forbidden, serialized)
+
+    def test_usage_observation_api_is_sanitized_and_reports_monitor_gaps(self):
+        status, body = self.request(
+            "POST",
+            "/v1/usage/observe",
+            {
+                "account_id": "safe-account",
+                "source": "manual",
+                "balance": 27.5,
+                "balance_unit": "USD",
+                "active_jobs": 1,
+                "active_cost_per_hour": 3.29,
+            },
+            {"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.port}"},
+        )
+        self.assertEqual(200, status)
+        self.assertEqual("observed", body["accounts"][0]["status"])
+        self.assertEqual("manual", body["meter_events"][-1]["source"])
+        self.assertFalse(body["meter_events"][-1]["external_activity_detected"])
+        self.assertTrue(
+            any(row["account_id"] == "safe-account" for row in body["monitoring"]["gaps"])
+        )
+        serialized = canonical_json(body)
+        for forbidden in ("auth", "command", "endpoint", "key_env"):
+            self.assertNotIn(forbidden, serialized)
+
+        status, rejected = self.request(
+            "POST",
+            "/v1/usage/observe",
+            {"account_id": "safe-account", "balance": 1, "provider": "spoofed"},
+            {"Content-Type": "application/json"},
+        )
+        self.assertEqual(400, status)
+        self.assertEqual("invalid_observation", rejected["error"]["code"])
 
     def test_plan_endpoint(self):
         status, body = self.request(

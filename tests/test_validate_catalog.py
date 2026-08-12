@@ -32,7 +32,7 @@ class CatalogValidationTests(unittest.TestCase):
                 "status": "ready",
                 "balance": 3.29,
                 "balance_unit": "USD credit",
-                "balance_as_of": catalog["as_of"],
+                "balance_as_of": catalog["safe_balance_snapshot_as_of"],
                 "payment_state": "not_required",
                 "hard_stop": True,
                 "paid_fallback_allowed": False,
@@ -51,6 +51,31 @@ class CatalogValidationTests(unittest.TestCase):
     def test_valid_baseline(self):
         errors, _warnings = self.validate(copy.deepcopy(self.baseline))
         self.assertEqual([], errors)
+
+    def test_safe_balance_clock_remains_independent(self):
+        catalog = copy.deepcopy(self.baseline)
+        account = next(item for item in catalog["accounts"] if item.get("acquired_safe") is True)
+        account["balance_as_of"] = catalog["as_of"]
+        errors, _warnings = self.validate(catalog)
+        self.assert_error_contains(errors, "must match safe balance snapshot")
+
+    def test_research_clock_bounds_source_retrieval(self):
+        catalog = copy.deepcopy(self.baseline)
+        catalog["research_retrieved_as_of"] = catalog["safe_balance_snapshot_as_of"]
+        errors, _warnings = self.validate(catalog)
+        self.assert_error_contains(errors, "verified_on: 2026-08-12 is after evaluation date 2026-08-11")
+
+    def test_usage_clock_bounds_append_only_history(self):
+        catalog = copy.deepcopy(self.baseline)
+        catalog["usage_observed_as_of"] = catalog["safe_balance_snapshot_as_of"]
+        errors, _warnings = self.validate(catalog)
+        self.assert_error_contains(errors, "after usage observation clock")
+
+    def test_catalog_clock_equals_latest_subclock(self):
+        catalog = copy.deepcopy(self.baseline)
+        catalog["as_of"] = "2026-08-13"
+        errors, _warnings = self.validate(catalog)
+        self.assert_error_contains(errors, "must equal the latest declared retrieval or observation clock")
 
     def test_public_catalog_rejects_email_and_local_user_path(self):
         for leaked in ("owner@example.com", r"C:\Users\Example\secret.json"):

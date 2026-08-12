@@ -1,14 +1,19 @@
 name: CI
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      hosted_credit_warning:
+        description: "Hosted Actions credits are nearly exhausted. Type RUN HOSTED CI to confirm this spend."
+        required: true
+        default: "DO NOT RUN"
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: ${{ inputs.hosted_credit_warning == 'RUN HOSTED CI' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

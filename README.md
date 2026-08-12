@@ -21,6 +21,18 @@ The launcher validates the catalog, starts the unified loopback service, and ope
 
 A plain static server can still display the catalog, but live usage and arming controls remain unavailable until the loopback API is enabled. Static mode fails quietly into catalog-only mode; it is not a second dashboard or a second source of truth.
 
+For start-at-logon hosting, install the user-scoped scheduled task once:
+
+```powershell
+./install_app_service.ps1
+# Remove only the scheduled task; an already-running app is left alone.
+./uninstall_app_service.ps1
+```
+
+The supervisor accepts only the exact loopback health identity `free-compute-app` version 2. It reuses one healthy instance, replaces only an older process whose command line is verified as this checkout's orchestrator, and refuses to stop an unknown process occupying the port.
+
+Usage monitoring has two paths. Configured provider monitors refresh automatically while the app runs. A browser, CLI, or human can also submit a redacted observation to `POST /v1/usage/observe` with an account ID and meter fields such as balance, active jobs, hourly cost, or expiry. Manual observations are append-only evidence and never become the authoritative `live` monitor snapshot required for dispatch. The app does not store API keys or authentication topology in public usage output.
+
 ## Safe run flow
 
 1. Review the redacted ledger and the latest provider meter observations.
@@ -39,6 +51,8 @@ py -m unittest discover -s tests -v
 py scripts/orchestrator.py plan --job .\specs\example-job.json
 py scripts/orchestrator.py ledger
 ```
+
+Run these gates locally. GitHub-hosted Actions credits are nearly exhausted, so pushes and pull requests do not start hosted CI. The repository workflow is manual-only and requires typing an explicit hosted-credit warning before it can run. A self-hosted runner may use the same commands without consuming hosted Actions capacity.
 
 Use the catalog refresh date for `--as-of`. A green UI or test suite does not prove that a volatile offer remains card-free, that a quota remains available, or that a provider will stop before a charge. Re-read the live meter and hard-stop state immediately before arming.
 

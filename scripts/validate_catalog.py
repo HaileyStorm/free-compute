@@ -17,6 +17,9 @@ from urllib.parse import urlsplit
 REQUIRED_TOP_LEVEL = {
     "schema_version": int,
     "as_of": str,
+    "safe_balance_snapshot_as_of": str,
+    "research_retrieved_as_of": str,
+    "usage_observed_as_of": str,
     "owner": dict,
     "policy": dict,
     "tracking": dict,
@@ -345,7 +348,7 @@ def _validate_dates(data: Any, evaluation_date: date, errors: list[str]) -> None
 def _validate_acquired_account(
     account: dict[str, Any],
     path: str,
-    catalog_date: date,
+    safe_balance_date: date,
     evaluation_date: date,
     reference_price: float,
     errors: list[str],
@@ -362,9 +365,9 @@ def _validate_acquired_account(
 
     balance_date = _parse_date(account.get("balance_as_of"), f"{path}.balance_as_of", errors)
     if balance_date is not None:
-        if balance_date != catalog_date:
+        if balance_date != safe_balance_date:
             errors.append(
-                f"{path}.balance_as_of: acquired-safe balance must be live on catalog as_of {catalog_date}"
+                f"{path}.balance_as_of: acquired-safe balance must match safe balance snapshot {safe_balance_date}"
             )
         age = (evaluation_date - balance_date).days
         if age > 1:
@@ -757,8 +760,33 @@ def validate_catalog(
         return errors, warnings
 
     catalog_date = _parse_date(data["as_of"], "catalog.as_of", errors)
-    if catalog_date is None:
+    safe_balance_date = _parse_date(
+        data["safe_balance_snapshot_as_of"],
+        "catalog.safe_balance_snapshot_as_of",
+        errors,
+    )
+    research_date = _parse_date(
+        data["research_retrieved_as_of"],
+        "catalog.research_retrieved_as_of",
+        errors,
+    )
+    usage_date = _parse_date(
+        data["usage_observed_as_of"],
+        "catalog.usage_observed_as_of",
+        errors,
+    )
+    if None in (catalog_date, safe_balance_date, research_date, usage_date):
         return errors, warnings
+    for field, clock in (
+        ("safe_balance_snapshot_as_of", safe_balance_date),
+        ("research_retrieved_as_of", research_date),
+        ("usage_observed_as_of", usage_date),
+    ):
+        if clock > catalog_date:
+            errors.append(f"catalog.{field}: {clock} is after catalog as_of {catalog_date}")
+    if catalog_date != max(safe_balance_date, research_date, usage_date):
+        errors.append("catalog.as_of: must equal the latest declared retrieval or observation clock")
+
     check_date = evaluation_date or catalog_date
     if catalog_date > check_date:
         errors.append(f"catalog.as_of: {catalog_date} is after evaluation date {check_date}")
@@ -783,7 +811,7 @@ def validate_catalog(
     _validate_sources(
         normalization.get("sources"),
         "catalog.normalization.sources",
-        check_date,
+        research_date,
         errors,
         warnings,
         required=True,
@@ -833,7 +861,7 @@ def validate_catalog(
                 _validate_sources(
                     record.get("sources"),
                     f"{path}.sources",
-                    check_date,
+                    research_date,
                     errors,
                     warnings,
                     required=True,
@@ -842,7 +870,7 @@ def validate_catalog(
                 _validate_sources(
                     record.get("sources"),
                     f"{path}.sources",
-                    check_date,
+                    research_date,
                     errors,
                     warnings,
                     required=False,
@@ -854,7 +882,7 @@ def validate_catalog(
                 _validate_acquired_account(
                     record,
                     path,
-                    catalog_date,
+                    safe_balance_date,
                     check_date,
                     float(reference_price),
                     errors,
@@ -888,9 +916,29 @@ def validate_catalog(
             record,
             path,
             account_ids,
-            check_date,
+            research_date,
             errors,
             warnings,
+        )
+
+    history_dates: list[date] = []
+    for index, snapshot in enumerate(data["history"]):
+        if not isinstance(snapshot, dict):
+            continue
+        observed = _parse_date(
+            snapshot.get("observed_on"),
+            f"catalog.history[{index}].observed_on",
+            errors,
+        )
+        if observed is not None:
+            history_dates.append(observed)
+            if observed > usage_date:
+                errors.append(
+                    f"catalog.history[{index}].observed_on: {observed} is after usage observation clock {usage_date}"
+                )
+    if history_dates and max(history_dates) != usage_date:
+        errors.append(
+            "catalog.usage_observed_as_of: must equal the latest history observation"
         )
 
     _validate_extended_metadata(data, float(reference_price), errors)

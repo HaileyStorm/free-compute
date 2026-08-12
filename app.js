@@ -61,7 +61,9 @@ const state = {
     data: null,
     loading: false,
     lastSuccessAt: null,
-    error: null
+    error: null,
+    observing: false,
+    observeFeedback: ""
   },
   arm: {
     supported: null,
@@ -736,7 +738,7 @@ function pickerHardware(hardware) {
 
 function accountPickerRows(catalog) {
   const referenceRate = number(catalog.normalization?.reference_usd_per_h100e_hour);
-  return catalog.accounts.filter(matches).map(account => {
+  return catalog.accounts.filter(account => account.acquired_safe === true && usabilityOf(account).usableNow === true && matches(account)).map(account => {
     const linkedOffers = catalog.offers.filter(offer => offer.account_id === account.id);
     const hardwareChoice = bestSingleHardware([account, ...linkedOffers]);
     const total = account.acquired_safe === true ? accountH100e(account, referenceRate) : null;
@@ -790,7 +792,6 @@ function offerPickerRows(catalog) {
 
 function pickerSection(catalog) {
   const accounts = pickerSort(accountPickerRows(catalog), state.pickerSort);
-  const offers = pickerSort(offerPickerRows(catalog), state.pickerSort);
   const accountRows = accounts.map((row, index) => {
     const account = row.item;
     return `<tr>
@@ -804,32 +805,24 @@ function pickerSection(catalog) {
       <td>${esc(account.next_action || "No action recorded.")}<br><span class="links">${itemLinks(account)}</span></td>
     </tr>`;
   }).join("");
-  const offerRows = offers.map((row, index) => {
-    const offer = row.item;
-    const safety = `${offer.payment_method || "unknown"} payment / ${offer.hard_stop === true ? "hard stop" : offer.hard_stop === false ? "no hard stop" : "hard stop unknown"}`;
-    return `<tr>
-      <td class="rank">${index + 1}</td>
-      <td><strong>${esc(offer.provider)}</strong><br><span class="muted">${esc(offer.title || "Single offer")}</span><br>${pill(offer.status)}</td>
-      <td><strong>${row.totalDisplay}</strong><br><span class="muted">${row.usableDisplay}</span></td>
-      <td>${pickerHardware(row.hardware)}</td>
-      <td>${computeFamilyBadges(offer)}</td>
-      <td>${esc(label(row.stability))}<br><span class="muted">${esc(label(recurrenceOf(offer)))}</span></td>
-      <td>${poolBadge(offer)}<br><span class="muted">${esc(safety)}</span></td>
-      <td>${esc(offer.eligibility || "Eligibility not recorded")}<br><strong>Next:</strong> ${esc(offer.next_action || "No action recorded.")}<br><span class="links">${itemLinks(offer)} &middot; ${sourceLinks(offer.sources)}</span></td>
-    </tr>`;
-  }).join("");
-
   return `<section id="provider-picker" class="picker-section">
-    <div class="picker-heading"><div><p class="eyebrow">Provider / project picker</p><h2>Ranked single-account and single-offer choices</h2><p>Rows are independent choices. Linked configurations identify one best hardware option; no overlapping quota or offer is stacked. Offer figures are conditional catalog ceilings, ranked individually and never counted as found usable.</p></div>
+    <div class="picker-heading"><div><p class="eyebrow">Choose compute you already have</p><h2>Safe, usable provider picker</h2><p>Only safely acquired accounts marked usable now appear here. Each row is one account; linked configurations identify its best hardware option without stacking overlapping quota.</p></div>
       <label>Rank by <select id="picker-sort"><option value="usable" ${state.pickerSort === "usable" ? "selected" : ""}>Immediately usable H100e</option><option value="total" ${state.pickerSort === "total" ? "selected" : ""}>Total H100e / catalog ceiling</option><option value="vram" ${state.pickerSort === "vram" ? "selected" : ""}>Max per-unit VRAM</option><option value="family" ${state.pickerSort === "family" ? "selected" : ""}>Compute family</option><option value="compute" ${state.pickerSort === "compute" ? "selected" : ""}>Compute class</option></select></label>
     </div>
-    <div class="picker-view acquired-picker"><div class="section-heading"><div><p class="eyebrow">View 1 / acquired ledger</p><h3>Accounts</h3><p>Safe totals and immediately usable H100e are account-scoped only.</p></div><span class="count">${accounts.length}</span></div>
-      <div class="picker-table"><table><thead><tr><th>#</th><th>Single account</th><th>Usable / total</th><th>Best single hardware</th><th>Compute family</th><th>Stability / cadence</th><th>Pool fit</th><th>Action</th></tr></thead><tbody>${accountRows || '<tr><td colspan="8">No matching accounts.</td></tr>'}</tbody></table></div>
-    </div>
-    <div class="picker-view offer-picker"><div class="section-heading"><div><p class="eyebrow">View 2 / generally available and conditional</p><h3>Offers</h3><p>Each figure is a conditional catalog ceiling. It is not proof of current usability, is not additive, and never enters acquired totals.</p></div><span class="count">${offers.length}</span></div>
-      <div class="picker-table"><table><thead><tr><th>#</th><th>Single offer</th><th>Catalog ceiling / conditional</th><th>Hardware</th><th>Compute family</th><th>Stability / cadence</th><th>Status / pool</th><th>Eligibility / action</th></tr></thead><tbody>${offerRows || '<tr><td colspan="8">No matching offers.</td></tr>'}</tbody></table></div>
+    <div class="picker-view acquired-picker"><div class="section-heading"><div><p class="eyebrow">Usable now</p><h3>Best existing accounts</h3><p>Safe H100e is account-scoped only. TPU capacity remains native and separate.</p></div><span class="count">${accounts.length}</span></div>
+      <div class="picker-table"><table><thead><tr><th>#</th><th>Single account</th><th>Usable / total</th><th>Best single hardware</th><th>Compute family</th><th>Stability / cadence</th><th>Pool fit</th><th>Action</th></tr></thead><tbody>${accountRows || '<tr><td colspan="8">No safe, immediately usable account matches these inventory filters.</td></tr>'}</tbody></table></div>
     </div>
   </section>`;
+}
+
+function acquisitionSection(catalog) {
+  const offers = pickerSort(offerPickerRows(catalog), state.pickerSort);
+  const rows = offers.map((row, index) => {
+    const offer = row.item;
+    const safety = `${offer.payment_method || "unknown"} payment / ${offer.hard_stop === true ? "hard stop" : offer.hard_stop === false ? "no hard stop" : "hard stop unknown"}`;
+    return `<tr><td class="rank">${index + 1}</td><td><strong>${esc(offer.provider)}</strong><br><span class="muted">${esc(offer.title || "Single offer")}</span><br>${pill(offer.status)}</td><td><strong>${row.totalDisplay}</strong><br><span class="muted">${row.usableDisplay}</span></td><td>${pickerHardware(row.hardware)}</td><td>${computeFamilyBadges(offer)}</td><td>${esc(label(row.stability))}<br><span class="muted">${esc(label(recurrenceOf(offer)))}</span></td><td>${poolBadge(offer)}<br><span class="muted">${esc(safety)}</span></td><td>${esc(offer.eligibility || "Eligibility not recorded")}<br><strong>Next:</strong> ${esc(offer.next_action || "No action recorded.")}<br><span class="links">${itemLinks(offer)} &middot; ${sourceLinks(offer.sources)}</span></td></tr>`;
+  }).join("");
+  return `<section id="next-acquisition" class="picker-section acquisition-section"><div class="section-heading"><div><p class="eyebrow">Next acquisition</p><h2>Conditional opportunities</h2><p>Independent, non-additive catalog ceilings—not acquired balances or proof of immediate usability. Complete eligibility and zero-liability checks before acting.</p></div><span class="count">${offers.length}</span></div><div class="picker-table"><table><thead><tr><th>#</th><th>Single offer</th><th>Conditional ceiling</th><th>Hardware</th><th>Compute family</th><th>Stability / cadence</th><th>Status / pool</th><th>Eligibility / action</th></tr></thead><tbody>${rows || '<tr><td colspan="8">No conditional offer matches these inventory filters.</td></tr>'}</tbody></table></div></section>`;
 }
 
 function storageIsZeroLiability(item) {
@@ -1230,17 +1223,70 @@ function usageBalance(account) {
   return /usd/i.test(unit) ? usd(value) : `${decimal(value)}${unit ? ` ${unit}` : ""}`;
 }
 
+function meterQuantity(value, unit) {
+  const parsed = number(value);
+  if (parsed === null) return "Not reported";
+  return `${decimal(parsed)}${unit ? ` ${unit}` : ""}`;
+}
+
+function usageMeters(account) {
+  const supplied = account?.meters;
+  const meters = Array.isArray(supplied)
+    ? supplied
+    : supplied && typeof supplied === "object"
+      ? Object.entries(supplied).map(([id, meter]) => meter && typeof meter === "object" ? { id, ...meter } : { id, value: meter })
+      : [];
+  const normalized = meters.filter(meter => meter && typeof meter === "object").map((meter, index) => ({
+    id: String(meter.id || meter.kind || `meter-${index + 1}`),
+    kind: String(meter.kind || "meter"),
+    label: String(meter.label || meter.id || meter.kind || `Meter ${index + 1}`),
+    value: number(meter.value),
+    available: number(meter.available),
+    used: number(meter.used),
+    unit: String(meter.unit || "").trim(),
+    resetAt: meter.reset_at || null,
+    expiresAt: meter.expires_at || null
+  }));
+  if (normalized.length) return normalized;
+  const legacyMeters = [
+    { id: "h100e-hours", label: "Accelerator hours", available: number(account?.available_h100e), used: number(account?.used_h100e), unit: "H100e" },
+    { id: "tpu-hours", label: "TPU hours", available: number(account?.available_tpu_hours), used: number(account?.used_tpu_hours), unit: "TPU hours" }
+  ].filter(meter => meter.available !== null || meter.used !== null);
+  return legacyMeters.map(meter => ({ ...meter, kind: "accelerator-hours", value: null, resetAt: null, expiresAt: null }));
+}
+
+function meterSummary(meter, { includeTiming = true } = {}) {
+  const quantities = [];
+  if (meter.value !== null) quantities.push(`Value ${meterQuantity(meter.value, meter.unit)}`);
+  if (meter.available !== null) quantities.push(`Available ${meterQuantity(meter.available, meter.unit)}`);
+  if (meter.used !== null) quantities.push(`Used ${meterQuantity(meter.used, meter.unit)}`);
+  if (!quantities.length) quantities.push("No value reported");
+  if (includeTiming && meter.resetAt) quantities.push(`Resets ${compactDateTime(meter.resetAt)}`);
+  if (includeTiming && meter.expiresAt) quantities.push(`Expires ${compactDateTime(meter.expiresAt)}`);
+  return quantities.join(" · ");
+}
+
+function meterList(meters, { compact = false } = {}) {
+  if (!meters.length) return '<span class="muted">No meter values reported</span>';
+  return `<ul class="meter-list ${compact ? "is-compact" : ""}">${meters.map(meter => `<li><strong>${esc(meter.label)}</strong><span>${esc(meterSummary(meter, { includeTiming: !compact }))}</span></li>`).join("")}</ul>`;
+}
+
+function activeCostRate(account) {
+  const value = number(account.active_cost_per_hour);
+  if (value === null) return "Cost rate unknown";
+  const unit = String(account.active_cost_unit || "provider units").trim();
+  return `${meterQuantity(value, unit)}/hour`;
+}
+
 function usageExternal(account) {
   if (account.external_activity_detected === true) {
     const deltas = account.deltas && typeof account.deltas === "object" ? account.deltas : {};
-    const parts = [];
-    const used = number(deltas.external_h100e ?? deltas.external_usage_h100e ?? deltas.used_h100e);
-    const available = number(deltas.available_h100e);
+    const meters = usageMeters({ meters: deltas.meters });
     const balance = number(deltas.balance);
-    if (used !== null) parts.push(`${used >= 0 ? "+" : ""}${decimal(used)} used H100e`);
-    if (available !== null) parts.push(`${available >= 0 ? "+" : ""}${decimal(available)} available H100e`);
-    if (balance !== null) parts.push(`${balance >= 0 ? "+" : ""}${decimal(balance)} balance`);
-    return `<strong class="external-use">Detected</strong>${parts.length ? `<br><span class="muted">${esc(parts.join(" / "))}</span>` : ""}`;
+    const details = meters.length
+      ? meterList(meters, { compact: true })
+      : balance === null ? "" : `<br><span class="muted">${esc(`${balance >= 0 ? "+" : ""}${meterQuantity(balance, deltas.balance_unit || "") } balance`)}</span>`;
+    return `<strong class="external-use">Detected</strong>${details}`;
   }
   if (account.external_activity_detected === false) return "Not detected";
   return '<span class="muted">Unknown</span>';
@@ -1259,14 +1305,20 @@ function liveUsageSection() {
   const stale = Boolean(state.live.error || staleByAge || accounts.some(account => account.status === "error"));
   const monitoring = data?.monitoring && typeof data.monitoring === "object" ? data.monitoring : {};
   const refreshLabel = state.live.lastSuccessAt ? compactDateTime(state.live.lastSuccessAt) : "Awaiting first meter read";
+  const activeAccounts = accounts.filter(account => (number(account.active_jobs) ?? 0) > 0 || (number(account.active_cost_per_hour) ?? 0) > 0);
+  const accountOptions = (state.catalog?.accounts || []).map(account => `<option value="${esc(account.id)}">${esc(account.provider || account.id)} — ${esc(account.id)}</option>`).join("");
+  const activeAlerts = activeAccounts.map(account => {
+    const meters = usageMeters(account);
+    return `<article class="spend-alert"><div><p class="eyebrow">Active external work</p><h3>${esc(account.provider || account.account_id || "Provider")}</h3><p>${number(account.active_jobs) === null ? "Job count unknown" : `${decimal(account.active_jobs, 0)} active job${number(account.active_jobs) === 1 ? "" : "s"}`} · <strong>${esc(activeCostRate(account))}</strong></p></div><dl><div><dt>Balance</dt><dd>${esc(usageBalance(account))}</dd></div><div><dt>Meters</dt><dd>${meterList(meters, { compact: true })}</dd></div><div><dt>Observed</dt><dd>${esc(compactDateTime(account.observed_at))}</dd></div><div><dt>Expiry</dt><dd>${esc(compactDateTime(account.expires_at))}</dd></div></dl><p class="monitor-only"><strong>Monitor only.</strong> This app does not stop, restart, or launch this external workload.</p></article>`;
+  }).join("");
   const rows = accounts.map(account => `
     <tr>
       <td><strong>${esc(account.provider || account.account_id || "Unknown account")}</strong><br><span class="muted">${esc(account.account_id || "No account id")}</span></td>
       <td>${pill(account.status || "never_polled")}<br><span class="muted">Observed ${esc(compactDateTime(account.observed_at))}</span>${account.error ? `<br><span class="inline-error">${esc(account.error.message || account.error.code || account.error)}</span>` : ""}</td>
       <td><strong>${esc(usageBalance(account))}</strong><br><span class="muted">Next poll ${esc(compactDateTime(account.next_poll_at))}</span></td>
-      <td><strong>${decimal(account.available_h100e)} H100e</strong><br><span class="muted">${decimal(account.used_h100e)} H100e used by tracked jobs</span></td>
+      <td>${meterList(usageMeters(account))}</td>
       <td>${usageExternal(account)}</td>
-      <td>${number(account.active_jobs) === null ? "Active jobs unknown" : `${decimal(account.active_jobs, 0)} active`}<br><span class="muted">${number(account.active_cost_per_hour) === null ? "Cost rate unknown" : `${usd(account.active_cost_per_hour)}/hour`} / expiry ${esc(compactDateTime(account.expires_at))}</span></td>
+      <td>${number(account.active_jobs) === null ? "Active jobs unknown" : `${decimal(account.active_jobs, 0)} active`}<br><span class="muted">${esc(activeCostRate(account))} / expiry ${esc(compactDateTime(account.expires_at))}</span></td>
     </tr>`).join("");
   const configured = number(monitoring.configured);
   const enabled = number(monitoring.enabled);
@@ -1274,8 +1326,9 @@ function liveUsageSection() {
     ? `Polling (${enabled ?? 0} enabled)`
     : configured === 0 ? "Not configured" : enabled === 0 ? "Disabled" : "Paused";
 
-  return `<section id="live-usage" class="live-section ${stale ? "is-stale" : ""}" aria-live="polite">
-    <div class="section-heading"><div><p class="eyebrow">Live usage overlay</p><h2>Balances and availability</h2><p>Provider meters include use outside this app when it can be detected. Catalog values remain visible when a meter is unavailable.</p></div><span class="pill ${stale ? "status-error" : "status-live"}">${stale ? "Stale / attention" : esc(modeLabel)}</span></div>
+  return `<section id="live-usage" class="live-section ${stale ? "is-stale" : ""} ${activeAccounts.length ? "has-active-spend" : ""}" aria-live="polite">
+    <div class="section-heading"><div><p class="eyebrow">Usage and credit watch</p><h2>${activeAccounts.length ? `${activeAccounts.length} monitored account${activeAccounts.length === 1 ? "" : "s"} reporting active work` : "Balances and meter availability"}</h2><p>Meter observations include external use when detected. Observation never grants permission to dispatch work.</p></div><span class="pill ${stale ? "status-error" : activeAccounts.length ? "status-warn" : "status-live"}">${stale ? "Stale / attention" : activeAccounts.length ? "Active use" : esc(modeLabel)}</span></div>
+    ${activeAlerts ? `<div class="spend-alerts">${activeAlerts}</div>` : ""}
     <div class="live-meta" role="status">
       <span><strong>Last refresh:</strong> ${esc(refreshLabel)}</span>
       <span><strong>Provider as-of:</strong> ${esc(compactDateTime(data?.as_of))}</span>
@@ -1284,9 +1337,19 @@ function liveUsageSection() {
       <button id="refresh-usage" type="button" ${state.live.loading ? "disabled" : ""}>${state.live.loading ? "Refreshing..." : "Refresh meters"}</button>
     </div>
     <div class="table-wrap live-table"><table>
-      <thead><tr><th scope="col">Provider / account</th><th scope="col">Meter status</th><th scope="col">Balance</th><th scope="col">H100e availability</th><th scope="col">External use</th><th scope="col">Active work</th></tr></thead>
+      <thead><tr><th scope="col">Provider / account</th><th scope="col">Meter status</th><th scope="col">Balance</th><th scope="col">Meters</th><th scope="col">External use</th><th scope="col">Active work</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="6">${state.live.loading ? "Loading live meters..." : "No monitored accounts were returned."}</td></tr>`}</tbody>
     </table></div>
+    <details class="meter-observation"><summary>Record a read-only meter observation</summary><p>Use this when a provider session or CLI shows fresh usage that an automatic monitor cannot read. No API key, login, or secret is accepted. The generic meter fields support any unit; accelerator-hour fields are only convenience shortcuts.</p>
+      <form id="observe-usage-form"><div class="observation-grid">
+        <label>Account<select id="observe-account" required><option value="">Choose catalog account</option>${accountOptions}</select></label>
+        <label>Balance<input id="observe-balance" type="number" step="any" inputmode="decimal"></label><label>Balance unit<input id="observe-balance-unit" maxlength="24" placeholder="USD, credits..."></label>
+        <label>Meter ID<input id="observe-meter-id" maxlength="80" placeholder="tpu-hours"></label><label>Meter kind<input id="observe-meter-kind" maxlength="80" placeholder="accelerator-hours"></label><label>Meter unit<input id="observe-meter-unit" maxlength="32" placeholder="TPU hours, credits..."></label>
+        <label>Meter value<input id="observe-meter-value" type="number" step="any" inputmode="decimal"></label><label>Meter available<input id="observe-meter-available" type="number" step="any" inputmode="decimal"></label><label>Meter used<input id="observe-meter-used" type="number" step="any" inputmode="decimal"></label><label>Meter reset (optional)<input id="observe-meter-reset" type="datetime-local"></label><label>Meter expiry (optional)<input id="observe-meter-expiry" type="datetime-local"></label>
+        <label>Available H100e<input id="observe-available-h100e" type="number" min="0" step="any" inputmode="decimal"></label><label>Used H100e<input id="observe-used-h100e" type="number" min="0" step="any" inputmode="decimal"></label><label>Available TPU hours<input id="observe-available-tpu" type="number" min="0" step="any" inputmode="decimal"></label><label>Used TPU hours<input id="observe-used-tpu" type="number" min="0" step="any" inputmode="decimal"></label>
+        <label>Active jobs<input id="observe-active-jobs" type="number" min="0" step="1" inputmode="numeric"></label><label>Hourly cost<input id="observe-cost-hour" type="number" min="0" step="any" inputmode="decimal"></label><label>Cost unit<input id="observe-cost-unit" maxlength="32" placeholder="credits, USD..."></label><label>Credit expiry<input id="observe-expiry" type="datetime-local"></label>
+      </div><button class="primary-action" type="submit" ${state.live.observing ? "disabled" : ""}>${state.live.observing ? "Recording…" : "Record observation"}</button><p class="${state.live.observeFeedback?.startsWith("Error:") ? "inline-error" : "muted"}" aria-live="polite">${esc(state.live.observeFeedback || "At least one meter value is required. This cannot arm or alter provider resources.")}</p></form>
+    </details>
   </section>`;
 }
 
@@ -1509,18 +1572,21 @@ function render() {
       <div class="policy">Max liability <strong>${usd(catalog.policy.maximum_financial_liability_usd)}</strong></div>
     </header>
 
-    <section class="metrics" aria-label="Compute totals">
-      <article><span>Safe acquired availability</span><strong>${usd(summary.safeUsd)}</strong><small>${decimal(summary.safeH100e)} H100e; ${summary.safeUnconverted} unconverted; ${summary.safeTpuAccounts} TPU-capable accounts separate</small></article>
-      <article><span>Zero-liability usable now</span><strong>${usd(summary.usableUsd)}</strong><small>${decimal(summary.usableH100e)} H100e across ${summary.usableNow} accounts; TPU separate</small></article>
-      <article><span>All known account value</span><strong>${usd(summary.knownUsd)}</strong><small>${summary.knownBalanceAccounts} balances, including blocked/non-free</small></article>
-      <article class="blocked"><span>Blocked account value</span><strong>${usd(summary.blockedUsd)}</strong><small>Not counted; payment risk</small></article>
-      <article><span>Cataloged offers</span><strong>${catalog.offers.length}</strong><small>${activeGpu.length} direct GPU/TPU entries</small></article>
-    </section>
-
     ${liveUsageSection()}
 
-    <div class="toolbar" role="search">
-      <label class="search-field">Search <input id="search" type="search" value="${esc(state.query)}" placeholder="provider, GPU, allowance..." autocomplete="off"></label>
+    <section class="metrics primary-metrics" aria-label="Usable compute totals">
+      <article><span>Zero-liability usable now</span><strong>${decimal(summary.usableH100e)} H100e</strong><small>${usd(summary.usableUsd)} across ${summary.usableNow} safe accounts; conditional offers excluded</small></article>
+      <article><span>Safe acquired availability</span><strong>${decimal(summary.safeH100e)} H100e</strong><small>${usd(summary.safeUsd)}; ${summary.safeUnconverted} unconverted; TPU-native quota separate</small></article>
+    </section>
+
+    ${warningPanel(state.warnings)}
+    <div class="decision-grid">
+      ${pickerSection(catalog)}
+      ${armControlSection(catalog)}
+    </div>
+
+    <details class="inventory-controls"><summary>Inventory filters and advanced views</summary><p>These controls affect provider, account, and offer inventory below; they do not filter live meters, Arm state, storage, or history.</p><div class="toolbar" role="search" aria-label="Filter compute inventory">
+      <label class="search-field">Search inventory <input id="search" type="search" value="${esc(state.query)}" placeholder="provider, GPU, allowance..." autocomplete="off"></label>
       <label>Status <select id="status-filter"><option value="all">All statuses</option>${statuses.map(status => `<option value="${esc(status)}" ${state.status === status ? "selected" : ""}>${esc(statusLabel(status))}</option>`).join("")}</select></label>
       <label>Origin <select id="origin-filter"><option value="all">All origins</option>${[...ORIGINS].map(value => option(value, state.origin)).join("")}</select></label>
       <label>Cadence <select id="recurrence-filter"><option value="all">All cadences</option>${CADENCE_FILTERS.map(value => `<option value="${esc(value)}" ${state.recurrence === value ? "selected" : ""}>${esc(value === "one_time" ? "Single-use" : value === "recurring" ? "Recurring (any)" : label(value))}</option>`).join("")}</select></label>
@@ -1528,23 +1594,23 @@ function render() {
       <label>Pool fit <select id="poolability-filter"><option value="all">All pool fit</option>${[...POOL_SUITABILITY].map(value => option(value, state.poolability)).join("")}</select></label>
       <label>Compute family <select id="compute-family-filter"><option value="all">All families</option>${COMPUTE_FAMILIES.map(value => `<option value="${esc(value)}" ${state.computeFamily === value ? "selected" : ""}>${esc(computeFamilyLabel(value))}</option>`).join("")}</select></label>
       <label>Compute <select id="compute-filter"><option value="all">All classes</option>${computeClasses.map(value => option(value, state.computeClass)).join("")}</select></label>
-      <button id="clear-filters" type="button">Clear</button>
-    </div>
+      <button id="clear-filters" type="button">Clear inventory filters</button>
+    </div></details>
 
-    ${warningPanel(state.warnings)}
-    ${aggregatePanels(catalog, filteredOffers, summary)}
-    ${historySection(catalog.history, catalog.tracking)}
-    ${pickerSection(catalog)}
+    ${acquisitionSection(catalog)}
+    <details class="advanced-inventory"><summary>Advanced compute inventory and ledgers</summary>
+      ${aggregatePanels(catalog, filteredOffers, summary)}
+      ${accountTable("accounts-previous", "Previously held", "Compute and credits that existed before this project.", previouslyHeld, catalog.normalization)}
+      ${accountTable("accounts-found", "Found / acquired in this project", "New zero-liability availability discovered or acquired by this project.", foundHere, catalog.normalization)}
+      ${originUnknown.length ? accountTable("accounts-unknown", "Origin not classified", "Compatibility fallback; these entries are never assumed newly acquired.", originUnknown, catalog.normalization) : ""}
+      ${offerSection("gpu-dependable", "Dependable / non-interruptible", "Stable execution paths only; grants and payment-backed offers are listed elsewhere.", dependable)}
+      ${offerSection("gpu-interruptible", "Interruptible / preemptible", "Separate checkpointable lane; these sessions can be reclaimed or disconnected.", interruptible)}
+      ${offerSection("gpu-unknown", "Stability unknown", "Verify preemption and session behavior before treating these as dependable.", unknown)}
+      ${simpleOfferSection("secondary", "TPU-native, CPU, serverless, CI, and inference", "Secondary compute / TPU kept native", secondary)}
+      ${simpleOfferSection("deferred", "Applications and liability gates", "Grants / payment-blocked", deferred)}
+    </details>
     ${storageSection(catalog)}
-    ${armControlSection(catalog)}
-    ${accountTable("accounts-previous", "Previously held", "Compute and credits that existed before this project.", previouslyHeld, catalog.normalization)}
-    ${accountTable("accounts-found", "Found / acquired in this project", "New zero-liability availability discovered or acquired by this project.", foundHere, catalog.normalization)}
-    ${originUnknown.length ? accountTable("accounts-unknown", "Origin not classified", "Compatibility fallback; these entries are never assumed newly acquired.", originUnknown, catalog.normalization) : ""}
-    ${offerSection("gpu-dependable", "Dependable / non-interruptible", "Stable execution paths only; grants and payment-backed offers are listed elsewhere.", dependable)}
-    ${offerSection("gpu-interruptible", "Interruptible / preemptible", "Keep checkpoints. These sessions can be reclaimed or disconnected.", interruptible)}
-    ${offerSection("gpu-unknown", "Stability unknown", "Verify preemption and session behavior before treating these as dependable.", unknown)}
-    ${simpleOfferSection("secondary", "CPU, serverless, CI, and inference", "Secondary compute", secondary)}
-    ${simpleOfferSection("deferred", "Applications and liability gates", "Grants / payment-blocked", deferred)}
+    ${historySection(catalog.history, catalog.tracking)}
     ${blockerSection(catalog.blockers)}
     ${normalizationSection(catalog.normalization)}
     <footer>Loaded source: <code>${esc(state.catalogSource)}</code>. Personal identifiers are omitted. Unknown metadata is never inferred as safe or usable. This UI has no secret-entry or secret-persistence path.</footer>`;
@@ -1739,6 +1805,82 @@ function startApiPolling() {
 function bindLiveControls() {
   document.querySelector("#retry-live-api")?.addEventListener("click", retryLiveApi);
   document.querySelector("#refresh-usage")?.addEventListener("click", () => void refreshUsage({ force: true, manual: true }));
+  document.querySelector("#observe-usage-form")?.addEventListener("submit", event => {
+    event.preventDefault();
+    void submitUsageObservation();
+  });
+}
+
+async function submitUsageObservation() {
+  const value = id => document.querySelector(`#${id}`)?.value.trim() || "";
+  const payload = { account_id: value("observe-account"), source: "manual" };
+  const numeric = {
+    balance: "observe-balance",
+    available_h100e: "observe-available-h100e",
+    used_h100e: "observe-used-h100e",
+    available_tpu_hours: "observe-available-tpu",
+    used_tpu_hours: "observe-used-tpu",
+    active_jobs: "observe-active-jobs",
+    active_cost_per_hour: "observe-cost-hour"
+  };
+  Object.entries(numeric).forEach(([key, id]) => {
+    const raw = value(id);
+    if (raw !== "") payload[key] = Number(raw);
+  });
+  const balanceUnit = value("observe-balance-unit");
+  if (balanceUnit) payload.balance_unit = balanceUnit;
+  const meterId = value("observe-meter-id");
+  const meterKind = value("observe-meter-kind");
+  const meterValue = value("observe-meter-value");
+  const meterAvailable = value("observe-meter-available");
+  const meterUsed = value("observe-meter-used");
+  const meterUnit = value("observe-meter-unit");
+  const meterReset = value("observe-meter-reset");
+  const meterExpires = value("observe-meter-expiry");
+  if (meterId || meterKind || meterValue || meterAvailable || meterUsed || meterUnit || meterReset || meterExpires) {
+    if (!meterId || !meterKind || !meterUnit || [meterValue, meterAvailable, meterUsed].every(entry => entry === "")) {
+      state.live.observeFeedback = "Error: a generic meter needs an ID, kind, unit, and at least one of value, available, or used.";
+      replaceUsagePanel();
+      return;
+    }
+    const meter = { id: meterId, kind: meterKind, unit: meterUnit };
+    if (meterValue !== "") meter.value = Number(meterValue);
+    if (meterAvailable !== "") meter.available = Number(meterAvailable);
+    if (meterUsed !== "") meter.used = Number(meterUsed);
+    if (meterReset) meter.reset_at = new Date(meterReset).toISOString();
+    if (meterExpires) meter.expires_at = new Date(meterExpires).toISOString();
+    payload.meters = [meter];
+  }
+  const costUnit = value("observe-cost-unit");
+  if (costUnit) payload.active_cost_unit = costUnit;
+  const expiry = value("observe-expiry");
+  if (expiry) payload.expires_at = new Date(expiry).toISOString();
+  if (!payload.account_id) {
+    state.live.observeFeedback = "Error: choose a catalog account.";
+    replaceUsagePanel();
+    return;
+  }
+  if (!Object.keys(payload).some(key => !["account_id", "source"].includes(key))) {
+    state.live.observeFeedback = "Error: enter at least one meter value.";
+    replaceUsagePanel();
+    return;
+  }
+  try {
+    state.live.observing = true;
+    state.live.observeFeedback = "Recording observation…";
+    replaceUsagePanel();
+    const response = await apiRequest("/v1/usage/observe", { method: "POST", body: payload });
+    state.live.supported = true;
+    state.live.data = response;
+    state.live.lastSuccessAt = Date.now();
+    state.live.error = null;
+    state.live.observeFeedback = "Observation recorded. It is monitoring evidence only and cannot authorize dispatch.";
+  } catch (error) {
+    state.live.observeFeedback = `Error: ${error.message}`;
+  } finally {
+    state.live.observing = false;
+    replaceUsagePanel();
+  }
 }
 
 function updateArmPoolCompatibility() {
@@ -1979,20 +2121,19 @@ async function submitAutoArm() {
 
 async function loadCatalog() {
   try {
-    const candidates = ["data/catalog.json", "data/catalog.example.json"];
     let catalog = null;
     let loadedSource = null;
-    for (const path of candidates) {
-      const response = await fetch(path, { cache: "no-store" });
-      if (response.ok) {
-        catalog = await response.json();
-        loadedSource = path;
-        break;
-      }
-      if (path === "data/catalog.json" && response.status === 404) continue;
-      throw new Error(`${path}: HTTP ${response.status}`);
+    if (API_BASE) {
+      const ledger = await apiRequest("/v1/ledger");
+      catalog = ledger.catalog;
+      loadedSource = "/v1/ledger";
+      if (!catalog || typeof catalog !== "object") throw new Error("ledger did not include a catalog");
+    } else {
+      const response = await fetch("data/catalog.example.json", { cache: "no-store" });
+      if (!response.ok) throw new Error(`data/catalog.example.json: HTTP ${response.status}`);
+      catalog = await response.json();
+      loadedSource = "data/catalog.example.json";
     }
-    if (!catalog) throw new Error("neither live nor example catalog was found");
     catalog.blockers = Array.isArray(catalog.blockers) ? catalog.blockers : [];
     catalog.normalization = catalog.normalization && typeof catalog.normalization === "object" ? catalog.normalization : {};
     state.warnings = validateCatalog(catalog);

@@ -11,6 +11,7 @@ import math
 import mimetypes
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -40,6 +41,7 @@ MAX_IDEMPOTENCY_TOMBSTONES = 4096
 MAX_METER_EVENTS = 4096
 IDEMPOTENCY_RETENTION_DAYS = 30
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+ENV_REF_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 SAFE_PAYMENT_STATES = {
     "not_applicable",
     "not_required",
@@ -50,6 +52,15 @@ SAFE_PAYMENT_STATES = {
 }
 SAFE_MODES = {"plan", "manual_handoff", "dispatch"}
 AUTH_MODES = {"none", "env", "inline", "manual"}
+ONBOARDING_CREDENTIAL_METHODS = {
+    "none",
+    "env_ref",
+    "transient",
+    "cli_session",
+    "manual",
+    "reference",
+}
+ONBOARDING_PROVENANCE = {"user_supplied", "agent_acquired", "existing_session"}
 COMPUTE_BACKENDS = {"any", "cuda", "tpu", "rocm", "oneapi", "cpu"}
 STORAGE_PERSISTENCE_REQUESTS = {"any", "run", "medium_term", "long_term", "archive"}
 STATIC_FILES = {
@@ -109,6 +120,7 @@ SECRET_TEXT_PATTERNS = (
     ),
     re.compile(r"\b[A-Z][A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*\b"),
 )
+SECRET_CONFIG_VALUE_PATTERNS = SECRET_TEXT_PATTERNS[:-1]
 LOCAL_PATH_PATTERNS = (
     re.compile(r"(?i)\b[A-Z]:\\Users\\[^\\\s]+(?:\\[^\s]*)?"),
     re.compile(r"(?i)/(?:Users|home)/[^/\s]+(?:/[^\s]*)?"),
@@ -203,6 +215,26 @@ def _reject_inline_secrets(value: Any, path: str = "job") -> None:
     elif isinstance(value, list):
         for index, nested in enumerate(value):
             _reject_inline_secrets(nested, f"{path}[{index}]")
+
+
+def _reject_profile_secrets(value: Any, path: str = "profiles") -> None:
+    """Reject credentials accidentally embedded in local adapter configuration."""
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if _is_secret_key(key):
+                raise OrchestratorError(
+                    "inline_secret_rejected",
+                    f"{path}.{key} must be supplied by an environment reference or transient session slot",
+                )
+            _reject_profile_secrets(nested, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            _reject_profile_secrets(nested, f"{path}[{index}]")
+    elif isinstance(value, str) and any(pattern.search(value) for pattern in SECRET_CONFIG_VALUE_PATTERNS):
+        raise OrchestratorError(
+            "inline_secret_rejected",
+            f"{path} appears to contain a credential; use an environment reference or transient session slot",
+        )
 
 
 def validate_job(raw: Any) -> dict[str, Any]:
@@ -353,6 +385,7 @@ def load_profiles(path: Path | None) -> dict[str, dict[str, Any]]:
     for index, profile in enumerate(records):
         if not isinstance(profile, dict):
             raise OrchestratorError("invalid_config", f"profiles[{index}] must be an object")
+        _reject_profile_secrets(profile, f"profiles[{index}]")
         profile_id = _require_id(profile.get("id"), f"profiles[{index}].id")
         if profile_id in result:
             raise OrchestratorError("invalid_config", f"Duplicate profile id: {profile_id}")
@@ -1079,6 +1112,38 @@ def _dispatch_openai(
     }
 
 
+def _validate_session_openai_endpoint(base_url: Any, endpoint: Any) -> tuple[str, str]:
+    if not isinstance(base_url, str) or len(base_url) > 2048:
+        raise OrchestratorError("invalid_onboarding", "Session endpoint needs a bounded base_url")
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "https" and not (
+        parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+    ):
+        raise OrchestratorError("invalid_onboarding", "Session endpoint must use HTTPS or loopback HTTP")
+    if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise OrchestratorError("invalid_onboarding", "Session base_url cannot contain credentials, a query, or a fragment")
+    if not isinstance(endpoint, str) or not endpoint or len(endpoint) > 1024:
+        raise OrchestratorError("invalid_onboarding", "Session endpoint needs a bounded relative path")
+    parsed_endpoint = urlsplit(endpoint)
+    if (
+        parsed_endpoint.scheme
+        or parsed_endpoint.netloc
+        or endpoint.startswith("//")
+        or parsed_endpoint.query
+        or parsed_endpoint.fragment
+    ):
+        raise OrchestratorError("invalid_onboarding", "Session endpoint must be a relative path without query data")
+    request_url = urljoin(base_url.rstrip("/") + "/", endpoint.lstrip("/"))
+    parsed_request = urlsplit(request_url)
+    if (parsed_request.scheme, parsed_request.hostname, parsed_request.port) != (
+        parsed.scheme,
+        parsed.hostname,
+        parsed.port,
+    ):
+        raise OrchestratorError("invalid_onboarding", "Session endpoint must stay on the base origin")
+    return base_url, endpoint
+
+
 def _dispatch_command(job: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     command = profile.get("command")
     if not isinstance(command, list) or not command or not all(isinstance(arg, str) for arg in command):
@@ -1656,6 +1721,9 @@ class OrchestratorState:
         self.dispatch_generation = 0
         self.dispatch_in_progress = False
         self.arm_generation = 0
+        # Session slots intentionally never enter runtime state or API responses.
+        self.session_credentials: dict[str, dict[str, Any]] = {}
+        self.session_profiles: dict[str, dict[str, Any]] = {}
         self.arm_state = self._disarmed("not armed")
         self.arm_expires_monotonic: float | None = None
         self.arm_last_activity_monotonic: float | None = None
@@ -1693,6 +1761,334 @@ class OrchestratorState:
             for item in self.catalog.get("storage", [])
             if isinstance(item, dict) and isinstance(item.get("id"), str)
         }
+
+    def _profile_connection(self, profile_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            for slot in self.session_credentials.values():
+                if slot.get("profile_id") == profile_id:
+                    return dict(slot)
+        return None
+
+    def _connection_is_available(self, profile_id: str, profile: dict[str, Any]) -> bool:
+        slot = self._profile_connection(profile_id)
+        if slot is None:
+            return False
+        if slot.get("method") != "env_ref":
+            return True
+        auth = profile.get("auth")
+        key_env = auth.get("key_env") if isinstance(auth, dict) else None
+        return isinstance(key_env, str) and bool(os.environ.get(key_env))
+
+    def _effective_profiles(self) -> dict[str, dict[str, Any]]:
+        with self.lock:
+            return {**self.profiles, **self.session_profiles}
+
+    @staticmethod
+    def _catalog_onboarding_id(account_id: str) -> str:
+        return "catalog:" + account_id
+
+    @staticmethod
+    def _allowed_credential_methods(profile: dict[str, Any]) -> list[str]:
+        auth_mode = (profile.get("auth") or {}).get("mode", "none")
+        direct = {"none": "none", "env": "env_ref", "inline": "transient"}.get(auth_mode)
+        if direct is not None:
+            return [direct]
+        methods = {"manual", "reference"}
+        if profile.get("adapter") in {"command", "codex_exec", "claude_code"}:
+            methods.add("cli_session")
+        return sorted(methods)
+
+    @staticmethod
+    def _balance_verified(account: dict[str, Any], usage: dict[str, Any] | None) -> bool:
+        snapshot = usage or {}
+        value = snapshot.get("balance", account.get("balance"))
+        unit = snapshot.get("balance_unit", account.get("balance_unit"))
+        observed = snapshot.get("status") in {"live", "observed"} or bool(account.get("balance_as_of"))
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and isinstance(unit, str)
+            and bool(unit.strip())
+            and observed
+        )
+
+    def onboarding_view(self) -> dict[str, Any]:
+        accounts = self._accounts()
+        readiness: list[dict[str, Any]] = []
+        configured_account_ids: set[str] = set()
+        for profile in self.profiles.values():
+            profile_id = profile.get("id")
+            account_id = profile.get("account_id")
+            if not isinstance(profile_id, str) or not isinstance(account_id, str):
+                continue
+            configured_account_ids.add(account_id)
+            account = accounts.get(account_id, {})
+            connected = self._connection_is_available(profile_id, profile)
+            balance_verified = self._balance_verified(account, self.usage.get(account_id))
+            zero_liability_verified = bool(account) and account_is_zero_liability(account)[0]
+            policy_eligible = (
+                profile.get("enabled") is True
+                and profile.get("allow_dispatch") is True
+                and profile.get("adapter") != "claude_code"
+            )
+            readiness.append(
+                {
+                    "profile_id": profile_id,
+                    "account_id": account_id,
+                    "allowed_methods": self._allowed_credential_methods(profile),
+                    "connected": connected,
+                    "balance_verified": balance_verified,
+                    "zero_liability_verified": zero_liability_verified,
+                    "policy_eligible": bool(
+                        balance_verified
+                        and zero_liability_verified
+                        and policy_eligible
+                    ),
+                    # Legacy API field; it remains intentionally independent of connection state.
+                    "armable": bool(balance_verified and zero_liability_verified and policy_eligible),
+                    "routable_now": bool(
+                        connected
+                        and balance_verified
+                        and zero_liability_verified
+                        and policy_eligible
+                    ),
+                }
+            )
+        with self.lock:
+            session_profiles = {key: dict(value) for key, value in self.session_profiles.items()}
+        for profile_id, profile in session_profiles.items():
+            account_id = profile.get("account_id")
+            if not isinstance(account_id, str):
+                continue
+            configured_account_ids.add(account_id)
+            account = accounts.get(account_id, {})
+            slot = self._profile_connection(profile_id)
+            connected = self._connection_is_available(profile_id, profile)
+            balance_verified = self._balance_verified(account, self.usage.get(account_id))
+            zero_liability_verified = bool(account) and account_is_zero_liability(account)[0]
+            policy_eligible = (
+                profile.get("enabled") is True
+                and profile.get("allow_dispatch") is True
+                and zero_liability_verified
+                and balance_verified
+            )
+            readiness.append(
+                {
+                    "profile_id": profile_id,
+                    "account_id": account_id,
+                    "allowed_methods": [str(slot.get("method"))] if slot is not None else [],
+                    "connected": connected,
+                    "balance_verified": balance_verified,
+                    "zero_liability_verified": zero_liability_verified,
+                    "policy_eligible": policy_eligible,
+                    "armable": policy_eligible,
+                    "routable_now": bool(connected and policy_eligible),
+                    "session_only": True,
+                }
+            )
+        for account_id, account in accounts.items():
+            if account_id in configured_account_ids:
+                continue
+            balance_verified = self._balance_verified(account, self.usage.get(account_id))
+            zero_liability_verified = account_is_zero_liability(account)[0]
+            readiness.append(
+                {
+                    "profile_id": self._catalog_onboarding_id(account_id),
+                    "account_id": account_id,
+                    "capabilities": ["catalog", "manual_meter"],
+                    "allowed_methods": ["manual", "reference"],
+                    "connected": False,
+                    "balance_verified": balance_verified,
+                    "zero_liability_verified": zero_liability_verified,
+                    "policy_eligible": zero_liability_verified,
+                    "armable": zero_liability_verified,
+                    "routable_now": False,
+                    "missing_profile_definition": True,
+                    "next_action": "Add an endpoint or CLI monitor profile after recording safe balance evidence.",
+                }
+            )
+        checklist = [
+            {
+                "id": "catalog",
+                "status": "ready",
+                "prompt": "Review the catalog before connecting an account; no credential is needed to browse it.",
+            }
+        ]
+        if readiness and not any(item["connected"] for item in readiness):
+            checklist.append(
+                {
+                    "id": "connection",
+                    "status": "needed",
+                    "prompt": "Connect only the local credential method required by an existing profile.",
+                }
+            )
+        if any(not item["balance_verified"] for item in readiness):
+            checklist.append(
+                {
+                    "id": "balance_evidence",
+                    "status": "needed",
+                    "prompt": "Record current balance or quota evidence with a safe read-only meter or observation.",
+                }
+            )
+        if any(not item["zero_liability_verified"] for item in readiness):
+            checklist.append(
+                {
+                    "id": "liability_evidence",
+                    "status": "needed",
+                    "prompt": "Verify hard-stop and zero-liability evidence before considering an explicit arm request.",
+                }
+            )
+        return {
+            "credential_methods": sorted(ONBOARDING_CREDENTIAL_METHODS),
+            "readiness": readiness,
+            "checklist": checklist,
+        }
+
+    def connect_credential(self, raw: Any) -> dict[str, Any]:
+        if not isinstance(raw, dict) or set(raw) - {
+            "profile_id", "account_id", "method", "consent", "provenance", "value", "reference",
+            "adapter", "base_url", "endpoint", "env_ref",
+        }:
+            raise OrchestratorError("invalid_onboarding", "Connection request has unsupported fields")
+        raw_profile_id = raw.get("profile_id")
+        raw_account_id = raw.get("account_id")
+        if raw_profile_id is not None and raw_account_id is not None:
+            raise OrchestratorError("invalid_onboarding", "Connect by profile_id or account_id, not both")
+        if raw_profile_id is not None:
+            profile_id = _require_id(raw_profile_id, "profile_id")
+            profile = self.profiles.get(profile_id)
+            if profile is None:
+                raise OrchestratorError("invalid_onboarding", "Connection profile is not configured", status=404)
+            account_id = profile.get("account_id")
+            if not isinstance(account_id, str):
+                raise OrchestratorError("invalid_onboarding", "Connection profile has no account", status=409)
+        else:
+            account_id = _require_id(raw_account_id, "account_id")
+            if account_id not in self._accounts():
+                raise OrchestratorError("invalid_onboarding", "Connection account is not cataloged", status=404)
+            profile = None
+            profile_id = self._catalog_onboarding_id(account_id)
+        method = raw.get("method")
+        if method not in ONBOARDING_CREDENTIAL_METHODS:
+            raise OrchestratorError("invalid_onboarding", "Connection method is not supported")
+        provenance = raw.get("provenance")
+        if provenance not in ONBOARDING_PROVENANCE:
+            raise OrchestratorError("invalid_onboarding", "Connection provenance is required")
+        if raw.get("consent") is not True:
+            raise OrchestratorError("invalid_onboarding", "Explicit session consent is required")
+        value = raw.get("value")
+        reference = raw.get("reference")
+        adapter = raw.get("adapter")
+        session_openai = profile is None and adapter == "openai_compatible"
+        if method == "transient":
+            if not isinstance(value, str) or not value or len(value) > MAX_TEXT_LENGTH or reference is not None:
+                raise OrchestratorError("invalid_onboarding", "Transient connection needs one bounded session value")
+        elif method == "reference":
+            if not isinstance(reference, str) or ID_RE.fullmatch(reference) is None or value is not None:
+                raise OrchestratorError("invalid_onboarding", "Reference connection needs one opaque reference")
+        elif value is not None or reference is not None:
+            raise OrchestratorError("invalid_onboarding", "This connection method does not accept credential material")
+        if provenance == "agent_acquired" and method != "reference":
+            raise OrchestratorError(
+                "invalid_onboarding", "Agent-acquired connections may store reference metadata only"
+            )
+        allowed_methods = (
+            self._allowed_credential_methods(profile)
+            if profile is not None
+            else (["env_ref", "transient"] if session_openai else ["manual", "reference"])
+        )
+        if method not in allowed_methods:
+            raise OrchestratorError("invalid_onboarding", "Connection method does not match the configured profile")
+        credential_ref = "session-" + secrets.token_hex(12)
+        session_profile: dict[str, Any] | None = None
+        if session_openai:
+            base_url, endpoint = _validate_session_openai_endpoint(
+                raw.get("base_url"), raw.get("endpoint", "v1/chat/completions")
+            )
+            if method == "env_ref":
+                env_ref = raw.get("env_ref")
+                if not isinstance(env_ref, str) or ENV_REF_RE.fullmatch(env_ref) is None:
+                    raise OrchestratorError("invalid_onboarding", "env_ref must be a local environment reference")
+                auth = {"mode": "env", "key_env": env_ref}
+            else:
+                auth = {"mode": "inline"}
+            profile_id = credential_ref
+            session_profile = {
+                "id": profile_id,
+                "adapter": "openai_compatible",
+                "enabled": True,
+                "allow_dispatch": True,
+                "account_id": account_id,
+                "base_url": base_url,
+                "endpoint": endpoint,
+                "auth": auth,
+            }
+        elif adapter is not None or raw.get("base_url") is not None or raw.get("endpoint") is not None or raw.get("env_ref") is not None:
+            raise OrchestratorError("invalid_onboarding", "Session transport fields require openai_compatible")
+        with self.lock:
+            self.session_credentials[credential_ref] = {
+                "profile_id": profile_id,
+                "account_id": account_id,
+                "method": method,
+                "provenance": provenance,
+                "value": value if method == "transient" else None,
+                "reference": reference if method == "reference" else None,
+            }
+            if session_profile is not None:
+                self.session_profiles[profile_id] = session_profile
+        return {
+            "profile_id": profile_id,
+            "account_id": account_id,
+            "credential_ref": credential_ref,
+            "connected": (
+                self._connection_is_available(profile_id, session_profile)
+                if session_profile is not None
+                else self._connection_is_available(profile_id, profile)
+                if profile is not None
+                else False
+            ),
+        }
+
+    def clear_credential(self, raw: Any = None) -> dict[str, Any]:
+        if raw is not None and (not isinstance(raw, dict) or set(raw) - {"credential_ref", "profile_id", "account_id"}):
+            raise OrchestratorError("invalid_onboarding", "Clear request has unsupported fields")
+        raw = raw or {}
+        credential_ref = raw.get("credential_ref")
+        profile_id = raw.get("profile_id")
+        account_id = raw.get("account_id")
+        if credential_ref is not None and (not isinstance(credential_ref, str) or ID_RE.fullmatch(credential_ref) is None):
+            raise OrchestratorError("invalid_onboarding", "credential_ref is invalid")
+        if profile_id is not None:
+            _require_id(profile_id, "profile_id")
+        if account_id is not None:
+            _require_id(account_id, "account_id")
+        with self.lock:
+            selected = [
+                key for key, slot in self.session_credentials.items()
+                if (credential_ref is None or key == credential_ref)
+                and (profile_id is None or slot.get("profile_id") == profile_id)
+                and (account_id is None or slot.get("account_id") == account_id)
+            ]
+            for key in selected:
+                self.session_credentials.pop(key, None)
+                self.session_profiles.pop(key, None)
+        return {"cleared": len(selected)}
+
+    def _session_transient_auth(self, credential_ref: Any, profile_id: str) -> dict[str, str] | None:
+        if credential_ref is None:
+            return None
+        if not isinstance(credential_ref, str) or ID_RE.fullmatch(credential_ref) is None:
+            raise OrchestratorError("invalid_onboarding", "credential_ref is invalid")
+        with self.lock:
+            slot = self.session_credentials.get(credential_ref)
+            slot = None if slot is None else dict(slot)
+        if slot is None or slot.get("profile_id") != profile_id or slot.get("method") != "transient":
+            raise OrchestratorError("invalid_onboarding", "Credential reference is unavailable for this profile", status=409)
+        value = slot.get("value")
+        if not isinstance(value, str) or not value:
+            raise OrchestratorError("invalid_onboarding", "Transient credential is unavailable", status=409)
+        return {"api_key": value}
 
     @staticmethod
     def _idempotency_expiry(now: datetime | None = None) -> str:
@@ -2730,7 +3126,9 @@ class OrchestratorState:
                 raise
             return json.loads(canonical_json(safe_result))
 
-    def dispatch(self, job_raw: Any, transient_auth: Any = None) -> dict[str, Any]:
+    def dispatch(
+        self, job_raw: Any, transient_auth: Any = None, credential_ref: Any = None
+    ) -> dict[str, Any]:
         job = validate_job(job_raw)
         job["mode"] = "dispatch"
         request_hash = canonical_hash(job)
@@ -2759,10 +3157,11 @@ class OrchestratorState:
             return blocked("; ".join(freshness_reasons))
         allowed_accounts = set(arm["providers"])
         allowed_storage = set(arm["storage_ids"])
+        profiles = self._effective_profiles()
         plan = plan_job(
             job,
             self.catalog,
-            self.profiles,
+            profiles,
             allowed_account_ids=allowed_accounts,
             allowed_storage_ids=allowed_storage,
         )
@@ -2776,11 +3175,11 @@ class OrchestratorState:
             plan["reasons"] = account_freshness
             return remember(plan)
         profile_id = job.get("profile")
-        profile = self.profiles.get(profile_id) if isinstance(profile_id, str) else None
+        profile = profiles.get(profile_id) if isinstance(profile_id, str) else None
         if profile is None:
             matches = [
                 item
-                for item in self.profiles.values()
+                for item in profiles.values()
                 if item.get("enabled") is True
                 and item.get("allow_dispatch") is True
                 and item.get("adapter") != "claude_code"
@@ -2842,6 +3241,10 @@ class OrchestratorState:
                     ),
                 },
             )
+        if transient_auth is not None and credential_ref is not None:
+            return blocked("Use either direct transient auth or a session credential reference, not both")
+        if credential_ref is not None and (profile.get("auth") or {}).get("mode") == "inline":
+            transient_auth = self._session_transient_auth(credential_ref, str(profile.get("id")))
         monitor = _monitor_config(profile)
         if monitor is None and profile_id is None:
             plan["status"] = "manual_handoff"
@@ -3233,6 +3636,8 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
                         200,
                         {"profiles": [public_profile_summary(item) for item in state.profiles.values()]},
                     )
+                elif route == "/v1/onboarding":
+                    self._send(200, state.onboarding_view())
                 elif route == "/v1/usage":
                     self._send(200, state.usage_view())
                 elif route == "/v1/arm":
@@ -3260,9 +3665,13 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
                 elif route == "/v1/dispatch":
                     if not isinstance(body, dict) or "job" not in body:
                         raise OrchestratorError("invalid_request", "Dispatch body needs job and optional auth")
-                    result = state.dispatch(body["job"], body.get("auth"))
+                    result = state.dispatch(body["job"], body.get("auth"), body.get("credential_ref"))
                     status = 409 if result.get("status") in {"blocked", "in_progress", "ambiguous"} else 200
                     self._send(status, result)
+                elif route == "/v1/onboarding/connect":
+                    self._send(200, state.connect_credential(body))
+                elif route == "/v1/onboarding/clear":
+                    self._send(200, state.clear_credential(body))
                 elif route == "/v1/usage/refresh":
                     account_ids = body.get("account_ids") if isinstance(body, dict) else None
                     self._send(200, state.refresh_usage(account_ids))
@@ -3291,9 +3700,26 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
             except OrchestratorError as exc:
                 self._send(exc.status, {"error": {"code": exc.code, "message": str(exc)}})
 
+        def do_DELETE(self) -> None:
+            try:
+                self._validate_request_context()
+            except OrchestratorError as exc:
+                self._discard_rejected_body()
+                self._send(exc.status, {"error": {"code": exc.code, "message": str(exc)}})
+                return
+            try:
+                route = urlsplit(self.path).path
+                if route != "/v1/onboarding/clear":
+                    self._send(404, {"error": {"code": "not_found", "message": "Route not found"}})
+                    return
+                raw_length = self.headers.get("Content-Length")
+                body = {} if raw_length in {None, "0"} else self._body()
+                self._send(200, state.clear_credential(body))
+            except OrchestratorError as exc:
+                self._send(exc.status, {"error": {"code": exc.code, "message": str(exc)}})
+
         do_PUT = do_OPTIONS
         do_PATCH = do_OPTIONS
-        do_DELETE = do_OPTIONS
 
     return Handler
 

@@ -38,7 +38,7 @@
       "auth": {"mode": "env", "key_env": "FREE_COMPUTE_API_KEY"}
     },
     {
-      "id": "openai-compatible-inline-transient",
+      "id": "openai-compatible-session-credential",
       "adapter": "openai_compatible",
       "enabled": false,
       "allow_dispatch": false,
@@ -46,7 +46,7 @@
       "base_url": "https://api.example.com/",
       "endpoint": "v1/chat/completions",
       "auth": {"mode": "inline"},
-      "instructions": "Pass the key only as the API request's transient auth.api_key field; it is never saved or returned."
+      "instructions": "Connect a transient session credential through the loopback onboarding route with explicit consent and provenance. It is never saved or returned."
     },
     {
       "id": "codex-exec-setup",

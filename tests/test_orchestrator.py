@@ -1464,6 +1464,295 @@ class OrchestratorTests(unittest.TestCase):
                 load_profiles(path)
         self.assertEqual("invalid_config", caught.exception.code)
 
+    def test_profile_config_rejects_nested_credentials(self):
+        profile = command_profile()
+        profile["adapter_options"] = {"nested": {"api_key": "not-allowed"}}
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "profiles.json"
+            path.write_text(json.dumps({"profiles": [profile]}), encoding="utf-8")
+            with self.assertRaises(OrchestratorError) as caught:
+                load_profiles(path)
+        self.assertEqual("inline_secret_rejected", caught.exception.code)
+
+    def test_onboarding_transient_slot_is_ephemeral_and_redacted(self):
+        profile = {
+            "id": "inline-profile",
+            "adapter": "openai_compatible",
+            "enabled": False,
+            "allow_dispatch": False,
+            "account_id": "safe-account",
+            "auth": {"mode": "inline"},
+        }
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.json"
+            state = OrchestratorState(fixture_catalog(), {"inline-profile": profile}, path)
+            with self.assertRaises(OrchestratorError) as caught:
+                state.connect_credential(
+                    {
+                        "profile_id": "inline-profile",
+                        "method": "transient",
+                        "consent": True,
+                        "provenance": "agent_acquired",
+                        "value": "transient-only-secret",
+                    }
+                )
+            self.assertEqual("invalid_onboarding", caught.exception.code)
+            result = state.connect_credential(
+                {
+                    "profile_id": "inline-profile",
+                    "method": "transient",
+                    "consent": True,
+                    "provenance": "user_supplied",
+                    "value": "transient-only-secret",
+                }
+            )
+            self.assertNotIn("transient-only-secret", canonical_json(result))
+            self.assertTrue(state.onboarding_view()["readiness"][0]["connected"])
+            state._save_runtime_state()
+            self.assertNotIn("transient-only-secret", path.read_text(encoding="utf-8"))
+            restarted = OrchestratorState(fixture_catalog(), {"inline-profile": profile}, path)
+        self.assertFalse(restarted.onboarding_view()["readiness"][0]["connected"])
+
+    def test_onboarding_env_reference_and_connection_do_not_arm(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0].update({"balance": 1, "balance_unit": "credits"})
+        profile = {
+            "id": "env-profile",
+            "adapter": "command",
+            "enabled": True,
+            "allow_dispatch": True,
+            "account_id": "safe-account",
+            "command": ["provider-command"],
+            "auth": {"mode": "env", "key_env": "PRIVATE_ENV_NAME"},
+        }
+        state = OrchestratorState(catalog, {"env-profile": profile})
+        armable_before_connect = state.onboarding_view()["readiness"][0]["armable"]
+        with mock.patch.dict(os.environ, {"PRIVATE_ENV_NAME": "available-only-in-process"}, clear=False):
+            result = state.connect_credential(
+                {
+                    "profile_id": "env-profile",
+                    "method": "env_ref",
+                    "consent": True,
+                    "provenance": "user_supplied",
+                }
+            )
+            self.assertTrue(result["connected"])
+            self.assertNotIn("PRIVATE_ENV_NAME", canonical_json(result))
+            readiness = state.onboarding_view()["readiness"][0]
+            self.assertTrue(readiness["connected"])
+            self.assertEqual(armable_before_connect, readiness["armable"])
+            self.assertEqual(readiness["armable"], readiness["policy_eligible"])
+            self.assertTrue(readiness["routable_now"])
+            self.assertEqual(["env_ref"], readiness["allowed_methods"])
+            self.assertFalse(state.arm_view()["armed"])
+            self.assertEqual(1, state.clear_credential({"credential_ref": result["credential_ref"]})["cleared"])
+
+    def test_missing_environment_reference_is_never_connected_or_routable(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0].update({"balance": 1, "balance_unit": "credits"})
+        profile = {
+            "id": "env-profile",
+            "adapter": "command",
+            "enabled": True,
+            "allow_dispatch": True,
+            "account_id": "safe-account",
+            "command": ["provider-command"],
+            "auth": {"mode": "env", "key_env": "MISSING_ONBOARDING_ENV"},
+        }
+        with mock.patch.dict(os.environ, {}, clear=True):
+            state = OrchestratorState(catalog, {"env-profile": profile})
+            result = state.connect_credential({"profile_id": "env-profile", "method": "env_ref", "consent": True, "provenance": "user_supplied"})
+            self.assertFalse(result["connected"])
+            row = state.onboarding_view()["readiness"][0]
+            self.assertFalse(row["connected"])
+            self.assertFalse(row["routable_now"])
+
+    def test_clear_credential_accepts_catalog_account_id(self):
+        state = OrchestratorState(fixture_catalog(), {})
+        state.connect_credential({"account_id": "safe-account", "method": "reference", "consent": True, "provenance": "agent_acquired", "reference": "evidence-1"})
+        self.assertEqual(1, state.clear_credential({"account_id": "safe-account"})["cleared"])
+
+    def test_onboarding_catalog_is_useful_without_profiles_or_auth(self):
+        view = OrchestratorState(fixture_catalog(), {}).onboarding_view()
+        self.assertIn("none", view["credential_methods"])
+        self.assertEqual("catalog", view["checklist"][0]["id"])
+        rows = {item["account_id"]: item for item in view["readiness"]}
+        safe = rows["safe-account"]
+        self.assertEqual("catalog:safe-account", safe["profile_id"])
+        self.assertEqual(["catalog", "manual_meter"], safe["capabilities"])
+        self.assertEqual(["manual", "reference"], safe["allowed_methods"])
+        self.assertFalse(safe["connected"])
+        self.assertFalse(safe["balance_verified"])
+        self.assertTrue(safe["zero_liability_verified"])
+        self.assertTrue(safe["policy_eligible"])
+        self.assertFalse(safe["routable_now"])
+        self.assertTrue(safe["missing_profile_definition"])
+        self.assertIn("endpoint or CLI monitor profile", safe["next_action"])
+
+    def test_profileless_catalog_connection_is_metadata_only_and_never_routes(self):
+        state = OrchestratorState(fixture_catalog(), {})
+        reference = state.connect_credential(
+            {
+                "account_id": "safe-account",
+                "method": "reference",
+                "consent": True,
+                "provenance": "agent_acquired",
+                "reference": "evidence-1",
+            }
+        )
+        self.assertFalse(reference["connected"])
+        self.assertEqual("catalog:safe-account", reference["profile_id"])
+        self.assertNotIn("evidence-1", canonical_json(reference))
+        state.arm({"providers": ["safe-account"]})
+        job = fixture_job()
+        job["idempotency_key"] = "catalog-reference-key"
+        result = state.dispatch(job)
+        self.assertEqual("manual_handoff", result["status"])
+        self.assertTrue(any("No enabled dispatch profile" in item for item in result["warnings"]))
+
+    def test_session_openai_connection_is_usable_without_persisting_endpoint_or_key(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0].update({"balance": 2, "balance_unit": "credits"})
+        with TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.json"
+            state = OrchestratorState(catalog, {}, runtime)
+            connected = state.connect_credential(
+                {
+                    "account_id": "safe-account",
+                    "adapter": "openai_compatible",
+                    "base_url": "https://private.example/api/",
+                    "endpoint": "v1/chat/completions",
+                    "method": "transient",
+                    "consent": True,
+                    "provenance": "user_supplied",
+                    "value": "session-only-secret",
+                }
+            )
+            self.assertTrue(connected["connected"])
+            self.assertEqual(connected["credential_ref"], connected["profile_id"])
+            serialized = canonical_json({"connected": connected, "view": state.onboarding_view()})
+            for forbidden in ("private.example", "session-only-secret"):
+                self.assertNotIn(forbidden, serialized)
+            row = next(item for item in state.onboarding_view()["readiness"] if item["profile_id"] == connected["profile_id"])
+            self.assertEqual(["transient"], row["allowed_methods"])
+            self.assertTrue(row["routable_now"])
+            self.assertEqual([], state._effective_profiles().get(connected["profile_id"], {}).get("usage_monitor", []))
+            state.arm({"providers": ["safe-account"]})
+            job = fixture_job()
+            job.update({
+                "kind": "openai_inference",
+                "payload": {"model": "example", "messages": []},
+                "profile": connected["profile_id"],
+                "idempotency_key": "session-profile-key",
+            })
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = b'{"ok":true}'
+            opener = mock.MagicMock()
+            opener.open.return_value = response
+            with mock.patch("orchestrator.urlrequest.build_opener", return_value=opener):
+                result = state.dispatch(job, credential_ref=connected["credential_ref"])
+            self.assertEqual("completed", result["status"])
+            request = opener.open.call_args.args[0]
+            self.assertEqual("Bearer session-only-secret", request.get_header("Authorization"))
+            self.assertNotIn("session-only-secret", canonical_json(result))
+            self.assertNotIn("private.example", canonical_json(result))
+            state._save_runtime_state()
+            persisted = runtime.read_text(encoding="utf-8")
+            self.assertNotIn("session-only-secret", persisted)
+            self.assertNotIn("private.example", persisted)
+            restarted = OrchestratorState(catalog, {}, runtime)
+            self.assertEqual({}, restarted.session_profiles)
+            self.assertEqual({}, restarted.session_credentials)
+
+    def test_session_openai_rejects_agent_credential_and_unsafe_transport(self):
+        state = OrchestratorState(fixture_catalog(), {})
+        baseline = {
+            "account_id": "safe-account",
+            "adapter": "openai_compatible",
+            "base_url": "https://safe.example/",
+            "method": "transient",
+            "consent": True,
+            "value": "would-be-secret",
+        }
+        with self.assertRaises(OrchestratorError) as caught:
+            state.connect_credential({**baseline, "provenance": "agent_acquired"})
+        self.assertEqual("invalid_onboarding", caught.exception.code)
+        with self.assertRaises(OrchestratorError) as caught:
+            state.connect_credential({**baseline, "base_url": "http://unsafe.example/", "provenance": "user_supplied"})
+        self.assertEqual("invalid_onboarding", caught.exception.code)
+
+    def test_onboarding_allowed_methods_do_not_expose_auth_topology(self):
+        profiles = {
+            "none": {"id": "none", "adapter": "manual", "account_id": "safe-account", "auth": {"mode": "none"}},
+            "env": {"id": "env", "adapter": "manual", "account_id": "safe-account", "auth": {"mode": "env", "key_env": "PRIVATE_ENV"}},
+            "inline": {"id": "inline", "adapter": "manual", "account_id": "safe-account", "auth": {"mode": "inline"}},
+            "manual": {"id": "manual", "adapter": "manual", "account_id": "safe-account", "auth": {"mode": "manual"}},
+            "cli": {"id": "cli", "adapter": "command", "account_id": "safe-account", "auth": {"mode": "manual"}},
+        }
+        rows = {item["profile_id"]: item for item in OrchestratorState(fixture_catalog(), profiles).onboarding_view()["readiness"]}
+        self.assertEqual(["none"], rows["none"]["allowed_methods"])
+        self.assertEqual(["env_ref"], rows["env"]["allowed_methods"])
+        self.assertEqual(["transient"], rows["inline"]["allowed_methods"])
+        self.assertEqual(["manual", "reference"], rows["manual"]["allowed_methods"])
+        self.assertEqual(["cli_session", "manual", "reference"], rows["cli"]["allowed_methods"])
+        self.assertNotIn("PRIVATE_ENV", canonical_json(rows))
+
+    def test_profile_connection_snapshots_are_safe_during_slot_changes(self):
+        profile = {"id": "none-profile", "adapter": "manual", "account_id": "safe-account", "auth": {"mode": "none"}}
+        state = OrchestratorState(fixture_catalog(), {"none-profile": profile})
+        errors = []
+
+        def writer():
+            try:
+                for _ in range(100):
+                    state.connect_credential({"profile_id": "none-profile", "method": "none", "consent": True, "provenance": "existing_session"})
+                    state.clear_credential({"profile_id": "none-profile"})
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        thread = threading.Thread(target=writer)
+        thread.start()
+        for _ in range(100):
+            state._profile_connection("none-profile")
+            state.onboarding_view()
+        thread.join(timeout=3)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([], errors)
+
+    def test_dispatch_resolves_only_matching_transient_session_reference(self):
+        profile = {
+            "id": "inline-profile",
+            "adapter": "openai_compatible",
+            "enabled": True,
+            "allow_dispatch": True,
+            "account_id": "safe-account",
+            "base_url": "http://127.0.0.1:8000/",
+            "endpoint": "v1/chat/completions",
+            "auth": {"mode": "inline"},
+        }
+        state = OrchestratorState(fixture_catalog(), {"inline-profile": profile})
+        slot = state.connect_credential(
+            {
+                "profile_id": "inline-profile",
+                "method": "transient",
+                "consent": True,
+                "provenance": "user_supplied",
+                "value": "session-only-secret",
+            }
+        )
+        job = dispatch_job("session-ref-key", "inline-profile")
+        job.update({"kind": "openai_inference", "payload": {"model": "example", "messages": []}})
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"ok":true}'
+        opener = mock.MagicMock()
+        opener.open.return_value = response
+        with mock.patch("orchestrator.urlrequest.build_opener", return_value=opener):
+            state.arm({"providers": ["safe-account"]})
+            result = state.dispatch(job, credential_ref=slot["credential_ref"])
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("Bearer session-only-secret", opener.open.call_args.args[0].get_header("Authorization"))
+        self.assertNotIn("session-only-secret", canonical_json(result))
+
     def test_balance_thresholds_are_account_and_unit_bound(self):
         catalog = fixture_catalog()
         catalog["accounts"][0]["balance"] = 10
@@ -1563,6 +1852,36 @@ class ApiTests(unittest.TestCase):
             "auth",
         ):
             self.assertNotIn(forbidden, serialized)
+
+    def test_onboarding_api_is_same_origin_and_never_echoes_connection_material(self):
+        status, view = self.request("GET", "/v1/onboarding")
+        self.assertEqual(200, status)
+        self.assertIn("env_ref", view["credential_methods"])
+        self.assertNotIn("PRIVATE_API_KEY", canonical_json(view))
+
+        with mock.patch.dict(os.environ, {"PRIVATE_API_KEY": "available-only-in-process"}, clear=False):
+            status, connected = self.request(
+                "POST",
+                "/v1/onboarding/connect",
+                {
+                    "profile_id": "private-profile",
+                    "method": "env_ref",
+                    "consent": True,
+                    "provenance": "user_supplied",
+                },
+                {"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.port}"},
+            )
+        self.assertEqual(200, status)
+        self.assertTrue(connected["connected"])
+        self.assertNotIn("PRIVATE_API_KEY", canonical_json(connected))
+
+        status, cleared = self.request(
+            "DELETE",
+            "/v1/onboarding/clear",
+            headers={"Origin": f"http://localhost:{self.port}"},
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(1, cleared["cleared"])
 
     def test_usage_observation_api_is_sanitized_and_reports_monitor_gaps(self):
         status, body = self.request(

@@ -223,6 +223,20 @@ tr:last-child td { border-bottom: 0; }
 .meter-observation { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .meter-observation summary { cursor: pointer; font-weight: 800; }
 .meter-observation > p { color: var(--muted); font-size: .82rem; }
+.onboarding-section { margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.onboarding-readiness { margin: 14px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.onboarding-readiness summary { cursor: pointer; font-weight: 800; }
+.onboarding-table { margin: 14px 0; }
+.onboarding-checklist { display: grid; gap: 8px; margin: 14px 0; padding-left: 24px; }
+.onboarding-checklist li { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.credential-connect { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--panel) 85%, var(--bg)); }
+.credential-connect summary { cursor: pointer; font-weight: 800; }
+.credential-connect > p { color: var(--muted); font-size: .82rem; }
+.onboarding-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin: 12px 0; }
+.onboarding-grid label { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: .75rem; font-weight: 700; }
+.consent-check { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: .82rem; }
+.consent-check input { margin-top: 2px; }
+.onboarding-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .observation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin: 12px 0; }
 .observation-grid label { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: .75rem; font-weight: 700; }
 .storage-metrics, .storage-capacity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }

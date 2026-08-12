@@ -33,6 +33,18 @@ The supervisor accepts only the exact loopback health identity `free-compute-app
 
 Usage monitoring has two paths. Configured provider monitors refresh automatically while the app runs. A browser, CLI, or human can also submit a redacted observation to `POST /v1/usage/observe` with an account ID and meter fields such as balance, active jobs, hourly cost, or expiry. Manual observations are append-only evidence and never become the authoritative `live` monitor snapshot required for dispatch. The app does not store API keys or authentication topology in public usage output.
 
+## First-use account meters
+
+The catalog works before any account is connected. The optional loopback-only onboarding panel separates five facts for every account capability: connected, balance verified, zero-liability verified, policy eligible, and routable now. Older local services may report only an explicitly labelled combined readiness value. Connecting a meter never signs in, changes eligibility, adds payment, starts or stops work, or arms routing.
+
+Use only a method explicitly reported for that account capability: no credential; a manual reading or already-authenticated local CLI; an environment reference; an existing CLI session; a process-session-only pasted value; or an explicitly consented opaque reference. Transient values are cleared from the form immediately and are process-memory only; browser storage, catalog records, API output, and logs never retain them. A resulting opaque session reference is compatible with direct dispatch only for a configured inline-auth profile, and only while that local process remains alive. Agent-acquired material may only be represented by an explicitly consented opaque reference; acquiring, creating, rotating, or retrieving credentials requires separate user authorization. Missing authentication disables only the relevant account meter, not the catalog or other accounts.
+
+Catalog-only accounts still appear in first use. They can retain manual-meter or reference setup metadata, but are not connected or routable until a generic local endpoint or CLI monitor profile is configured. A manual setup leads to the redacted meter-observation form; it does not change provider resources or establish automated monitoring.
+
+For a catalog-only account, the user may explicitly opt into a session-only OpenAI-compatible dispatch connection: an HTTPS (or loopback HTTP) base URL, a same-origin relative endpoint, and either a one-request transient value or an existing environment reference. The browser clears these fields immediately after sending the loopback request; the service returns only opaque in-memory IDs. This capability does not create a usage monitor, verify a balance, affect policy eligibility, arm routing, or launch work. It may be used only after the normal fresh-meter, zero-liability, and explicit Arm gates pass. Agent-acquired material remains reference-only with explicit consent.
+
+Before treating an existing credit as usable, sign in or complete eligibility where needed, confirm no payment method, authorization hold, auto-top-up, paid fallback, or spending-limit change is involved, then obtain a fresh read-only meter and provider hard-stop evidence. A connection or a reported balance alone never makes an account armable.
+
 ## Safe run flow
 
 1. Review the redacted ledger and the latest provider meter observations.

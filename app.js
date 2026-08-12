@@ -65,6 +65,15 @@ const state = {
     observing: false,
     observeFeedback: ""
   },
+  onboarding: {
+    supported: null,
+    data: null,
+    loading: false,
+    submitting: false,
+    error: null,
+    feedback: "",
+    credentialRefs: new Map()
+  },
   arm: {
     supported: null,
     data: null,
@@ -1292,6 +1301,77 @@ function usageExternal(account) {
   return '<span class="muted">Unknown</span>';
 }
 
+function onboardingMethodLabel(method) {
+  return {
+    none: "No credential needed",
+    manual: "Manual read or local CLI",
+    env_ref: "Environment reference",
+    cli_session: "Existing local CLI session",
+    transient: "Paste once for this browser session",
+    reference: "Approved credential reference"
+  }[method] || label(method);
+}
+
+function onboardingMethodNote(method) {
+  return {
+    none: "No authentication material is sent.",
+    manual: "Use an already authenticated local tool, then record its redacted meter result below. This marks setup metadata only; it does not connect or make the account routable.",
+    env_ref: "The local service reads an already configured environment reference; its name and value are never shown here.",
+    cli_session: "Uses an already authenticated local CLI session; this app does not open a sign-in flow.",
+    transient: "The value is sent once over loopback, then immediately cleared from this form. It stays only in process memory and is lost on restart.",
+    reference: "Stores only an opaque reference and consent metadata. It never stores or displays a credential value."
+  }[method] || "This capability is configured by the local service.";
+}
+
+function onboardingReadinessFor(profileId) {
+  return (state.onboarding.data?.readiness || []).find(item => item && item.profile_id === profileId) || null;
+}
+
+function onboardingAllowedMethods(profileId) {
+  const methods = onboardingReadinessFor(profileId)?.allowed_methods;
+  return Array.isArray(methods) ? methods.filter(method => typeof method === "string") : [];
+}
+
+function onboardingReadinessStatus(item, key, fallback) {
+  if (typeof item[key] === "boolean") return { value: item[key], label: item[key] ? "Ready" : "Not ready" };
+  if (typeof item.armable === "boolean") return { value: item.armable, label: `${item.armable ? "Ready" : "Not ready"} (legacy combined readiness)` };
+  return { value: null, label: fallback };
+}
+
+function onboardingConnectionStatus(item) {
+  if (item.connected === true) return { value: true, label: "Connected" };
+  if (item.missing_profile_definition === true) return { value: null, label: "Catalog metadata only" };
+  if (item.session_only === true && Array.isArray(item.allowed_methods) && item.allowed_methods.includes("env_ref")) {
+    return { value: false, label: "Environment unavailable" };
+  }
+  return { value: false, label: "Not connected" };
+}
+
+function onboardingSection() {
+  if (state.onboarding.supported === false) return "";
+  const data = state.onboarding.data || {};
+  const readiness = Array.isArray(data.readiness) ? data.readiness.filter(item => item && typeof item === "object") : [];
+  const checklist = Array.isArray(data.checklist) ? data.checklist.filter(item => item && typeof item === "object") : [];
+  const profiles = readiness.map(item => `<option value="${esc(item.profile_id)}">${esc(item.account_id || item.profile_id)}</option>`).join("");
+  const rows = readiness.map(item => {
+    const connection = onboardingConnectionStatus(item);
+    const policy = onboardingReadinessStatus(item, "policy_eligible", "Not reported");
+    const routable = onboardingReadinessStatus(item, "routable_now", "Not reported");
+    const status = result => `<span class="pill ${result.value === true ? "status-ready" : result.value === false ? "status-warn" : "status-unknown"}">${esc(result.label)}</span>`;
+    const setupNote = item.missing_profile_definition === true && item.next_action
+      ? `<br><span class="muted">${esc(item.next_action)}</span>`
+      : "";
+    return `<tr><td><strong>${esc(item.account_id || item.profile_id)}</strong><br><span class="muted">${esc(item.profile_id)}</span>${setupNote}</td><td>${status(connection)}</td><td>${pill(item.balance_verified === true ? "ready" : "unknown")}</td><td>${pill(item.zero_liability_verified === true ? "ready" : "unknown")}</td><td>${status(policy)}</td><td>${status(routable)}</td></tr>`;
+  }).join("");
+  const checklistMarkup = checklist.length ? `<ol class="onboarding-checklist">${checklist.map(item => `<li><span class="pill status-${esc(item.status || "unknown")}">${esc(label(item.status || "unknown"))}</span><span>${esc(item.prompt || item.id)}</span></li>`).join("")}</ol>` : "<p class=\"muted\">The catalog works now. Connect only the account capability you want to monitor.</p>";
+  return `<section id="onboarding" class="onboarding-section" aria-live="polite">
+    <div class="section-heading"><div><p class="eyebrow">First use / account meter setup</p><h2>Connect only the meter capability you need</h2><p>Browse the catalog immediately. Connection, balance verification, zero-liability verification, policy eligibility, and current routability are separate facts; a missing credential disables only its affected account capability.</p></div><span class="pill">Optional</span></div>
+    ${checklistMarkup}
+    <details class="onboarding-readiness"><summary>Review readiness for ${readiness.length} account${readiness.length === 1 ? "" : "s"}</summary><div class="table-wrap onboarding-table"><table><thead><tr><th>Account</th><th>Connected</th><th>Balance verified</th><th>Zero liability</th><th>Policy eligible</th><th>Routable now</th></tr></thead><tbody>${rows || "<tr><td colspan=\"6\">No account connection is configured. Catalog and manual meter evidence remain available.</td></tr>"}</tbody></table></div></details>
+    ${readiness.length ? `<details class="credential-connect"><summary>Set up an account meter or session</summary><p>Sign-in, eligibility, and no-payment checks remain yours to confirm. This screen never creates or retrieves credentials. An agent-acquired reference requires your explicit consent and must already be available through an authorized secure route.</p><form id="onboarding-connect-form"><div class="onboarding-grid"><label>Account capability<select id="onboarding-profile" required>${profiles}</select></label><label>Connection method<select id="onboarding-method" required></select></label><label>Provenance<select id="onboarding-provenance" required><option value="user_supplied">User supplied</option><option value="existing_session">Existing session</option><option value="agent_acquired">Agent acquired (consented reference)</option></select></label><label id="onboarding-value-wrap" hidden>Session-only value<input id="onboarding-value" type="password" autocomplete="off" spellcheck="false" maxlength="4096"></label><label id="onboarding-reference-wrap" hidden>Opaque reference<input id="onboarding-reference" autocomplete="off" spellcheck="false" maxlength="160" pattern="[A-Za-z0-9._-]+"></label></div><label id="onboarding-assisted-wrap" class="consent-check" hidden><input id="onboarding-assisted" type="checkbox"> Set up a session-only OpenAI-compatible dispatch endpoint for this catalog account</label><div id="onboarding-assisted-fields" class="onboarding-grid" hidden><label>Base URL<input id="onboarding-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://service.example/" maxlength="2048"></label><label>Relative endpoint on that base URL<input id="onboarding-endpoint" autocomplete="off" spellcheck="false" value="v1/chat/completions" maxlength="1024"></label><label>Session authentication<select id="onboarding-session-method"><option value="transient">Paste once</option><option value="env_ref">Environment reference</option></select></label><label id="onboarding-env-ref-wrap" hidden>Environment reference<input id="onboarding-env-ref" autocomplete="off" spellcheck="false" maxlength="160" pattern="[A-Za-z_][A-Za-z0-9_]*"></label></div><p id="onboarding-method-note" class="muted"></p><label class="consent-check"><input id="onboarding-consent" type="checkbox" required> I consent to this local, capability-specific setup.</label><div class="onboarding-actions"><button class="primary-action" type="submit" ${state.onboarding.submitting ? "disabled" : ""}>${state.onboarding.submitting ? "Saving…" : "Save meter setup"}</button><button id="onboarding-clear" type="button" ${state.onboarding.submitting ? "disabled" : ""}>Clear this session setup</button></div><p class="${state.onboarding.error ? "inline-error" : "muted"}" aria-live="polite">${esc(state.onboarding.error || state.onboarding.feedback || "No credential values are retained in browser storage, rendered after submission, or written to the catalog.")}</p></form></details>` : ""}
+  </section>`;
+}
+
 function liveUsageSection() {
   if (state.live.supported === false) {
     return `<section id="live-usage" class="live-section static-mode" aria-live="polite">
@@ -1572,6 +1652,7 @@ function render() {
       <div class="policy">Max liability <strong>${usd(catalog.policy.maximum_financial_liability_usd)}</strong></div>
     </header>
 
+    ${onboardingSection()}
     ${liveUsageSection()}
 
     <section class="metrics primary-metrics" aria-label="Usable compute totals">
@@ -1731,6 +1812,13 @@ function replaceUsagePanel() {
   bindLiveControls();
 }
 
+function replaceOnboardingPanel() {
+  const panel = document.querySelector("#onboarding");
+  if (!panel) return;
+  panel.outerHTML = onboardingSection();
+  bindOnboardingControls();
+}
+
 function replaceArmPanel() {
   const panel = document.querySelector("#arm-control");
   if (!panel || !state.catalog) return;
@@ -1762,6 +1850,27 @@ async function refreshUsage({ force = false, manual = false } = {}) {
   }
 }
 
+async function refreshOnboarding({ force = false } = {}) {
+  if (state.onboarding.loading || state.onboarding.submitting || state.onboarding.supported === false && !force) return;
+  state.onboarding.loading = true;
+  try {
+    const payload = await apiRequest("/v1/onboarding");
+    state.onboarding.supported = true;
+    state.onboarding.data = payload;
+    state.onboarding.error = null;
+  } catch (error) {
+    if (state.onboarding.supported !== true && endpointUnavailable(error)) {
+      state.onboarding.supported = false;
+      state.onboarding.error = null;
+    } else {
+      state.onboarding.error = error.message;
+    }
+  } finally {
+    state.onboarding.loading = false;
+    replaceOnboardingPanel();
+  }
+}
+
 async function refreshArm({ force = false } = {}) {
   if (state.arm.loading || state.arm.submitting || state.arm.supported === false && !force) return;
   state.arm.loading = true;
@@ -1787,19 +1896,173 @@ async function refreshArm({ force = false } = {}) {
 function retryLiveApi() {
   state.live.supported = null;
   state.live.error = null;
+  state.onboarding.supported = null;
+  state.onboarding.error = null;
   state.arm.supported = null;
   state.arm.error = null;
-  void Promise.all([refreshUsage({ force: true }), refreshArm({ force: true })]);
+  void Promise.all([refreshUsage({ force: true }), refreshOnboarding({ force: true }), refreshArm({ force: true })]);
 }
 
 function startApiPolling() {
   if (state.apiPollTimer) window.clearInterval(state.apiPollTimer);
-  void Promise.all([refreshUsage({ force: true }), refreshArm({ force: true })]);
+  void Promise.all([refreshUsage({ force: true }), refreshOnboarding({ force: true }), refreshArm({ force: true })]);
   state.apiPollTimer = window.setInterval(() => {
     if (document.hidden) return;
     void refreshUsage();
+    void refreshOnboarding();
     void refreshArm();
   }, LIVE_POLL_MS);
+}
+
+function updateOnboardingMethodFields() {
+  const profileId = document.querySelector("#onboarding-profile")?.value || "";
+  const readiness = onboardingReadinessFor(profileId);
+  const assisted = document.querySelector("#onboarding-assisted")?.checked === true;
+  const sessionMethod = document.querySelector("#onboarding-session-method")?.value || "transient";
+  const method = assisted ? sessionMethod : document.querySelector("#onboarding-method")?.value || "";
+  const methodSelect = document.querySelector("#onboarding-method");
+  const allowedMethods = assisted ? [sessionMethod] : onboardingAllowedMethods(profileId);
+  const assistedWrap = document.querySelector("#onboarding-assisted-wrap");
+  const assistedFields = document.querySelector("#onboarding-assisted-fields");
+  const provenance = document.querySelector("#onboarding-provenance");
+  const baseUrl = document.querySelector("#onboarding-base-url");
+  const endpoint = document.querySelector("#onboarding-endpoint");
+  const envRef = document.querySelector("#onboarding-env-ref");
+  const envRefWrap = document.querySelector("#onboarding-env-ref-wrap");
+  const canAssist = readiness?.missing_profile_definition === true;
+  if (assistedWrap) assistedWrap.hidden = !canAssist;
+  if (!canAssist && document.querySelector("#onboarding-assisted")) document.querySelector("#onboarding-assisted").checked = false;
+  if (assistedFields) assistedFields.hidden = !assisted || !canAssist;
+  if (baseUrl) baseUrl.required = assisted && canAssist;
+  if (endpoint) endpoint.required = assisted && canAssist;
+  if (envRefWrap) envRefWrap.hidden = !assisted || sessionMethod !== "env_ref";
+  if (envRef) { envRef.required = assisted && sessionMethod === "env_ref"; if (!assisted || sessionMethod !== "env_ref") envRef.value = ""; }
+  if (provenance) {
+    provenance.disabled = assisted;
+    if (assisted) provenance.value = "user_supplied";
+  }
+  if (methodSelect) {
+    const retained = allowedMethods.includes(method) ? method : allowedMethods[0] || "";
+    methodSelect.innerHTML = allowedMethods.length
+      ? allowedMethods.map(item => `<option value="${esc(item)}" ${item === retained ? "selected" : ""}>${esc(onboardingMethodLabel(item))}</option>`).join("")
+      : '<option value="">No supported connection method reported</option>';
+    methodSelect.disabled = !allowedMethods.length;
+  }
+  const selectedMethod = methodSelect?.value || "";
+  const valueWrap = document.querySelector("#onboarding-value-wrap");
+  const referenceWrap = document.querySelector("#onboarding-reference-wrap");
+  const value = document.querySelector("#onboarding-value");
+  const reference = document.querySelector("#onboarding-reference");
+  if (valueWrap) valueWrap.hidden = selectedMethod !== "transient";
+  if (referenceWrap) referenceWrap.hidden = selectedMethod !== "reference";
+  if (value) { value.required = selectedMethod === "transient"; if (selectedMethod !== "transient") value.value = ""; }
+  if (reference) { reference.required = selectedMethod === "reference"; if (selectedMethod !== "reference") reference.value = ""; }
+  const note = document.querySelector("#onboarding-method-note");
+  if (note) note.textContent = assisted
+    ? "Optional dispatch-only session. It remains in local process memory and does not create a meter, change policy eligibility, make the account routable without normal gates, or start work."
+    : selectedMethod ? onboardingMethodNote(selectedMethod) : "This account capability has not reported a supported connection method.";
+}
+
+function bindOnboardingControls() {
+  const form = document.querySelector("#onboarding-connect-form");
+  if (!form) return;
+  document.querySelector("#onboarding-profile")?.addEventListener("change", updateOnboardingMethodFields);
+  document.querySelector("#onboarding-method")?.addEventListener("change", updateOnboardingMethodFields);
+  document.querySelector("#onboarding-assisted")?.addEventListener("change", updateOnboardingMethodFields);
+  document.querySelector("#onboarding-session-method")?.addEventListener("change", updateOnboardingMethodFields);
+  document.querySelector("#onboarding-clear")?.addEventListener("click", () => void clearOnboardingConnection());
+  form.addEventListener("submit", event => { event.preventDefault(); void submitOnboardingConnection(); });
+  updateOnboardingMethodFields();
+}
+
+async function submitOnboardingConnection() {
+  const value = id => document.querySelector(`#${id}`)?.value.trim() || "";
+  const profileId = value("onboarding-profile");
+  const assisted = document.querySelector("#onboarding-assisted")?.checked === true;
+  const method = assisted ? value("onboarding-session-method") : value("onboarding-method");
+  const provenance = value("onboarding-provenance");
+  const secretInput = document.querySelector("#onboarding-value");
+  const sessionValue = secretInput?.value || "";
+  const reference = value("onboarding-reference");
+  const baseUrl = value("onboarding-base-url");
+  const endpoint = value("onboarding-endpoint") || "v1/chat/completions";
+  const envRefInput = document.querySelector("#onboarding-env-ref");
+  const envRef = envRefInput?.value || "";
+  const consent = document.querySelector("#onboarding-consent")?.checked === true;
+  const readiness = onboardingReadinessFor(profileId);
+  const payload = { method, provenance, consent };
+  if (assisted) {
+    payload.account_id = readiness?.account_id;
+    payload.adapter = "openai_compatible";
+    payload.base_url = baseUrl;
+    payload.endpoint = endpoint;
+    if (method === "env_ref") payload.env_ref = envRef;
+  } else if (readiness?.missing_profile_definition === true) payload.account_id = readiness.account_id;
+  else payload.profile_id = profileId;
+  if (method === "transient") payload.value = sessionValue;
+  if (method === "reference") payload.reference = reference;
+  if (!profileId || !method || !provenance || !consent || method === "transient" && !sessionValue || method === "reference" && !reference || assisted && (!readiness?.missing_profile_definition || !baseUrl || !endpoint || method === "env_ref" && !envRef)) {
+    state.onboarding.error = "Choose an account, method, provenance, and consent; provide material only for the selected method.";
+    replaceOnboardingPanel();
+    return;
+  }
+  if (provenance === "agent_acquired" && method !== "reference") {
+    state.onboarding.error = "Agent-acquired material may be recorded only as an explicitly consented opaque reference.";
+    replaceOnboardingPanel();
+    return;
+  }
+  try {
+    state.onboarding.submitting = true;
+    state.onboarding.error = null;
+    state.onboarding.feedback = assisted ? "Creating a local session-only dispatch capability…" : "Saving only this account meter setup…";
+    if (secretInput) secretInput.value = "";
+    if (baseUrl) document.querySelector("#onboarding-base-url").value = "";
+    if (envRefInput) envRefInput.value = "";
+    const endpointInput = document.querySelector("#onboarding-endpoint");
+    if (endpointInput) endpointInput.value = "";
+    replaceOnboardingPanel();
+    const result = await apiRequest("/v1/onboarding/connect", { method: "POST", body: payload });
+    const sessionId = typeof result.profile_id === "string" ? result.profile_id : profileId;
+    if (typeof result.credential_ref === "string") state.onboarding.credentialRefs.set(sessionId, result.credential_ref);
+    if (method === "manual") {
+      state.onboarding.feedback = "Manual setup recorded. Record a redacted meter observation next; this does not connect or make the account routable.";
+      const accountSelect = document.querySelector("#observe-account");
+      if (accountSelect && readiness?.account_id) accountSelect.value = readiness.account_id;
+      document.querySelector("#live-usage")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (assisted) {
+      state.onboarding.feedback = "Session-only dispatch capability created. It is not a usage monitor and remains blocked until normal fresh-meter, zero-liability, and explicit Arm gates pass.";
+    } else {
+      state.onboarding.feedback = "Setup recorded for this local session. Verify balance and zero liability separately before policy eligibility or current routability is possible.";
+    }
+    await refreshOnboarding({ force: true });
+  } catch (error) {
+    state.onboarding.error = error.message;
+  } finally {
+    state.onboarding.submitting = false;
+    replaceOnboardingPanel();
+  }
+}
+
+async function clearOnboardingConnection() {
+  const profileId = document.querySelector("#onboarding-profile")?.value || "";
+  const readiness = onboardingReadinessFor(profileId);
+  const credentialRef = state.onboarding.credentialRefs.get(profileId);
+  try {
+    state.onboarding.submitting = true;
+    state.onboarding.error = null;
+    state.onboarding.feedback = "Clearing this session connection…";
+    replaceOnboardingPanel();
+    const payload = credentialRef ? { credential_ref: credentialRef } : readiness?.missing_profile_definition === true ? { account_id: readiness.account_id } : { profile_id: profileId };
+    await apiRequest("/v1/onboarding/clear", { method: "POST", body: payload });
+    state.onboarding.credentialRefs.delete(profileId);
+    state.onboarding.feedback = "Session connection cleared. The catalog and other account capabilities remain available.";
+    await refreshOnboarding({ force: true });
+  } catch (error) {
+    state.onboarding.error = error.message;
+  } finally {
+    state.onboarding.submitting = false;
+    replaceOnboardingPanel();
+  }
 }
 
 function bindLiveControls() {
@@ -1952,6 +2215,7 @@ function bindArmControls() {
 }
 
 function bindLiveAndArmControls() {
+  bindOnboardingControls();
   bindLiveControls();
   bindArmControls();
 }

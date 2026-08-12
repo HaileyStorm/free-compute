@@ -82,6 +82,9 @@ Requests and responses are JSON. The UI uses these same routes; there is no sepa
 | `GET` | `/v1/ledger` | Intentionally public, redacted catalog plus safe summary and non-additive compute-family slices; no login identity, SSO topology, keys, or auth configuration. |
 | `GET` | `/v1/storage` | Redacted native-unit storage inventory; capacities are non-additive. |
 | `GET` | `/v1/profiles` | Minimal adapter-readiness summaries: profile/account IDs and enabled, dispatch, planner, and monitor flags only. No auth mode, secret values, environment names, endpoints, headers, paths, or commands. |
+| `GET` | `/v1/onboarding` | First-use checklist and per-profile/account readiness. The catalog remains useful with no credential or profile. |
+| `POST` | `/v1/onboarding/connect` | Create an explicit in-memory slot for a configured profile, catalog metadata, or an opted-in session OpenAI-compatible profile. It never contacts a provider. |
+| `POST` or `DELETE` | `/v1/onboarding/clear` | Remove in-memory local connection slots by opaque reference, profile, or catalog account. |
 | `GET` | `/v1/usage` | Latest read-only provider usage observations and freshness state. |
 | `POST` | `/v1/usage/refresh` | Request a read-only meter refresh; never changes provider state. |
 | `GET` | `/v1/arm` | Current temporary arm state and remaining shutdown limits. |
@@ -135,6 +138,20 @@ Invoke-RestMethod http://127.0.0.1:8766/v1/disarm `
 
 Requests need `Content-Type: application/json` and a `Content-Length`. Request bodies are capped at 2 MiB and jobs at 1 MiB. Browser cross-origin dispatch is disabled. Responses use `Cache-Control: no-store`.
 
+## First-use credential onboarding
+
+Onboarding is provider-neutral and has no account-management behavior. It does not create accounts or API keys, sign in, redeem credits, alter billing, or make a provider request. The available local methods are `none`, `env_ref`, `transient`, `cli_session`, `manual`, and `reference`. A connection names an already configured profile, or records manual/reference metadata against a catalog account with no profile, requires explicit session consent and a provenance marker, and returns only an opaque session reference.
+
+Each profile exposes only its safe `allowed_methods`, never authentication topology or environment names: `none` profiles allow `none`, environment-reference profiles allow `env_ref`, and transient profiles allow `transient`. Manual profiles allow `manual` and `reference`; CLI-backed manual profiles additionally allow `cli_session`.
+
+`env_ref` uses the profile's existing local environment reference; the environment-variable name is never returned. A missing environment value is reported only as disconnected and non-routable, never as a usable connection. `transient` accepts one session-only value and is the only method that can hold a credential value. Its value never enters runtime state, browser storage, logs, responses, or persisted idempotency records; service restart clears every session slot. `reference` stores only opaque reference metadata. `cli_session` and `manual` record only that an already authenticated local workflow was selected. An agent-acquired connection is limited to explicitly consented `reference` metadata with `agent_acquired` provenance; onboarding never creates a credential.
+
+For a catalog account that does not yet have a local profile, an explicit user-supplied session connection can create one temporary OpenAI-compatible dispatch profile. Its request uses `account_id`, `adapter: "openai_compatible"`, an HTTPS (or loopback HTTP) `base_url`, a same-origin relative `endpoint`, and either `method: "transient"` with a session value or `method: "env_ref"` with a local environment-reference name. The response returns a single opaque `credential_ref`, which is also the temporary `profile_id` to place in a job. Neither endpoint nor credential material is returned, persisted, or visible through `/v1/profiles`. This is a dispatch adapter only; it does not fabricate a balance meter. Explicit arming, account safety/freshness, zero-liability, idempotency, and any configured monitor gates still apply before a provider request. Agent-acquired material cannot create this session profile: agents may only record an authorized opaque `reference`.
+
+The onboarding response separates `connected`, `balance_verified`, `zero_liability_verified`, `policy_eligible`, and `routable_now` for every configured profile/account pair. Catalog accounts without a profile also receive a stable synthetic `catalog:<account_id>` entry with only `catalog`/`manual_meter` capabilities, `manual`/`reference` methods, `missing_profile_definition: true`, and a generic next action to add an endpoint or CLI-monitor profile. Those entries are never routable and do not imply that an API key can be used. `policy_eligible` is catalog/profile evidence only; `routable_now` additionally requires a current local connection. The legacy `armable` field remains as an alias for `policy_eligible` until clients migrate. Connecting a local credential neither arms compute nor changes policy eligibility; an explicit `/v1/arm` request still performs the normal safety checks. Missing balance or zero-liability evidence remains a prompt for safe, read-only verification.
+
+`POST /v1/onboarding/clear` is the normal way to clear slots. It accepts an opaque `credential_ref`, `profile_id`, or catalog `account_id`; `DELETE /v1/onboarding/clear` is accepted for compatibility and can omit a request body to clear all current session slots.
+
 ## Read-only usage monitoring
 
 While the API is enabled, the app periodically reads `/v1/usage`; the refresh route asks supported adapters for a fresh provider meter observation. Because the provider meter is authoritative, a balance or quota change made by another browser, CLI, notebook, or app can appear here too. Free Compute reports the observation and its timestamp; it does not claim that an external delta was caused by this app.
@@ -143,6 +160,8 @@ Monitoring is read-only. It must not create a resource, stop or start a workload
 
 ## Secrets and local configuration
 
-Keep secrets out of jobs, catalog records, Markdown, committed configuration, screenshots, URLs, and terminal history. The public ledger may contain provider/account-credit records but never login identity or authentication material. Local adapters may resolve an environment-variable reference or accept an explicitly transient session value; the value is not saved, echoed, placed in browser storage, or returned by the API.
+Keep secrets out of jobs, catalog records, Markdown, committed configuration, screenshots, URLs, and terminal history. The loader recursively rejects secret-bearing configuration fields, including surplus nested fields. The public ledger may contain provider/account-credit records but never login identity or authentication material. Local adapters may resolve an environment-variable reference or a referenced transient session value; values are not saved, echoed, placed in browser storage, or returned by the API.
+
+For existing local callers only, `/v1/dispatch` continues to accept direct transient `auth` material. This compatibility path remains until callers have migrated to onboarding session references and a versioned removal gate is published; new browser flows must use `credential_ref` instead.
 
 The example provider configuration is disabled by default. Enabling an adapter authorizes only its documented workload path after arming; it is not authority to sign up, change billing, create deposits, enable auto-top-up, or perform account administration.

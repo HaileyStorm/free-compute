@@ -4145,7 +4145,9 @@ def _parse_host_header(value: Any) -> tuple[str, int | None]:
     return parsed.hostname, port
 
 
-def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
+def make_handler(
+    state: OrchestratorState, *, allow_lan: bool = False
+) -> type[BaseHTTPRequestHandler]:
     static_cache: dict[str, tuple[bytes, str]] = {}
     for route, relative in STATIC_FILES.items():
         path = (ROOT / relative).resolve()
@@ -4177,7 +4179,10 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
                 )
             host, port = _parse_host_header(self.headers.get("Host"))
             server_port = int(self.server.server_address[1])
-            if not _is_loopback_host(host) or port not in {None, server_port}:
+            if (not allow_lan and not _is_loopback_host(host)) or port not in {
+                None,
+                server_port,
+            }:
                 raise OrchestratorError(
                     "invalid_host", "Request Host is outside the local service", status=403
                 )
@@ -4196,9 +4201,11 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
                 raise OrchestratorError(
                     "invalid_origin", "Request Origin is invalid", status=403
                 ) from exc
+            same_host = isinstance(parsed.hostname, str) and parsed.hostname.lower() == host.lower()
             if (
                 parsed.scheme != "http"
-                or not _is_loopback_host(parsed.hostname)
+                or (not allow_lan and not _is_loopback_host(parsed.hostname))
+                or (allow_lan and not same_host)
                 or (origin_port or 80) != server_port
                 or parsed.username
                 or parsed.password
@@ -4302,7 +4309,16 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
                 elif route == "/v1/onboarding":
                     self._send(200, state.onboarding_view())
                 elif route == "/v1/acquisition":
-                    self._send(200, state.acquisition_view())
+                    acquisition = state.acquisition_view()
+                    acquisition["api"]["scope"] = (
+                        "trusted_lan" if allow_lan else "local_loopback_only"
+                    )
+                    acquisition["api"]["authentication"] = (
+                        "none; explicit --allow-lan bind and same-origin browser controls"
+                        if allow_lan
+                        else "none; loopback Host and same-origin controls are enforced"
+                    )
+                    self._send(200, acquisition)
                 elif route == "/v1/usage":
                     self._send(200, state.usage_view())
                 elif route == "/v1/arm":
@@ -4389,14 +4405,17 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def serve(state: OrchestratorState, host: str, port: int) -> None:
-    if not _is_loopback_host(host):
+def serve(
+    state: OrchestratorState, host: str, port: int, *, allow_lan: bool = False
+) -> None:
+    if not _is_loopback_host(host) and not allow_lan:
         raise OrchestratorError(
-            "invalid_bind", "The local service may bind only to a loopback address"
+            "invalid_bind",
+            "Non-loopback binding requires the explicit --allow-lan option",
         )
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         raise OrchestratorError("invalid_port", "Port must be between 1 and 65535")
-    server = ThreadingHTTPServer((host, port), make_handler(state))
+    server = ThreadingHTTPServer((host, port), make_handler(state, allow_lan=allow_lan))
     state.start_monitoring()
     print(f"Free Compute app listening on http://{host}:{port}")
     try:
@@ -4422,9 +4441,14 @@ def build_parser() -> argparse.ArgumentParser:
     manual.add_argument("--job", type=Path, required=True)
     manual.add_argument("--provider")
     manual.add_argument("--profile")
-    server = commands.add_parser("serve", help="Run the loopback JSON API")
+    server = commands.add_parser("serve", help="Run the local JSON API")
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=8766)
+    server.add_argument(
+        "--allow-lan",
+        action="store_true",
+        help="permit an explicit non-loopback bind for a trusted LAN",
+    )
     commands.add_parser("ledger", help="Print a redacted ledger summary")
     commands.add_parser("profiles", help="Print configured profiles without secrets")
     return parser
@@ -4459,7 +4483,7 @@ def main(argv: list[str] | None = None) -> int:
             job["mode"] = "manual_handoff" if args.command == "manual" else "plan"
             print(json.dumps(state.plan(job), indent=2, ensure_ascii=False, sort_keys=True))
         elif args.command == "serve":
-            serve(state, args.host, args.port)
+            serve(state, args.host, args.port, allow_lan=args.allow_lan)
         elif args.command == "ledger":
             print(json.dumps(ledger_summary(catalog), indent=2, ensure_ascii=False, sort_keys=True))
         elif args.command == "profiles":

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install a loopback-only systemd user service. It never grants remote access.
+# Install a systemd user service. Loopback is the default; LAN is explicit.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -7,6 +7,8 @@ root_dir="$(cd -- "${script_dir}/.." && pwd -P)"
 unit_name="free-compute.service"
 unit_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
 unit_path="${unit_dir}/${unit_name}"
+environment_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/free-compute"
+environment_path="${environment_dir}/service.env"
 checkout_marker="# free-compute-checkout: ${root_dir}"
 
 if ! command -v systemctl >/dev/null 2>&1; then
@@ -45,13 +47,14 @@ trap 'rm -f -- "${temp_path}"' EXIT
 {
   printf '%s\n' "${checkout_marker}"
   printf '%s\n' '[Unit]'
-  printf '%s\n' 'Description=Free Compute loopback API'
+  printf '%s\n' 'Description=Free Compute local API'
   printf '%s\n' 'After=network-online.target'
   printf '%s\n\n' 'Wants=network-online.target'
   printf '%s\n' '[Service]'
   printf 'WorkingDirectory=%s\n' "$(systemd_quote "${root_dir}")"
   printf '%s\n' 'Environment=PYTHONUNBUFFERED=1'
   printf '%s\n' 'Environment=FREE_COMPUTE_HOST=127.0.0.1'
+  printf 'EnvironmentFile=-%s\n' "$(systemd_quote "${environment_path}")"
   printf 'ExecStart=%s %s %s\n' "$(systemd_quote /usr/bin/env)" "$(systemd_quote bash)" "$(systemd_quote "${script_dir}/linux_start.sh")"
   printf '%s\n' 'Restart=on-failure'
   printf '%s\n\n' 'RestartSec=3'

@@ -1,6 +1,6 @@
 # Free Compute
 
-Free Compute is one local app for finding, inventorying, monitoring, and safely routing zero-liability compute. The browser UI and JSON API share one loopback service, and both read the same public, redacted ledger. Advertised capacity, payment-backed balances, and conditional grants stay separate from capacity that is actually acquired and safe to use.
+Free Compute is one app for finding, inventorying, monitoring, and safely routing zero-liability compute. The browser UI and JSON API share one service, loopback by default or explicitly available to a trusted LAN, and both read the same public, redacted ledger. Advertised capacity, payment-backed balances, and conditional grants stay separate from capacity that is actually acquired and safe to use.
 
 The catalog snapshot dated 2026-08-11 counts **$165.91 of GPU-normalized safely acquired compute, equal to 50.43 H100e-hours**. TPU allowances remain outside those totals. Saturn Cloud is acquired but deliberately unconverted until its GPU meter is proved, so it is not in either normalized total. Expired ChatGPT Desktop referral credits are retained only as other-compute history and are not counted as available compute.
 
@@ -10,7 +10,7 @@ The catalog snapshot dated 2026-08-11 counts **$165.91 of GPU-normalized safely 
 ./start_app.ps1
 ```
 
-The launcher validates the catalog, starts the unified loopback service, and opens Free Compute. The app provides:
+The launcher validates the catalog, starts the unified service, and opens Free Compute. The app provides:
 
 - a publishable redacted ledger of acquired compute, opportunities, storage, balances, quota observations, and dated evidence;
 - ranked dependable and interruptible provider choices without adding their quotas together;
@@ -29,15 +29,30 @@ For start-at-logon hosting, install the user-scoped scheduled task once:
 ./uninstall_app_service.ps1
 ```
 
-The supervisor accepts only the exact loopback health identity `free-compute-app` version 2. It reuses one healthy instance, replaces only an older process whose command line is verified as this checkout's orchestrator, and refuses to stop an unknown process occupying the port.
+To let another trusted LAN machine use this same Windows instance—including the full browser UI, monitoring, Arm, planning, and dispatch APIs—install it with an explicit LAN bind:
 
-For a Linux worker or an SSH-forwarded browser/API client, use the [Linux guide](docs/linux.md). Linux requires Python 3.10 or newer; the control API and client remain loopback-only, including through an SSH tunnel. The guide explains the user-scoped `systemd` service, local profile overlay, and safe tunnel topology. The [acquisition runbook](docs/acquisition.md) is the handoff for a browser-capable agent or a human completing legitimate provider setup; it does not authorize payment, eligibility misrepresentation, CAPTCHA bypass, or use of an unsafe balance.
+```powershell
+./install_app_service.ps1 -HostAddress 0.0.0.0 -AllowLan
+# On the other machine, open http://WINDOWS_LAN_IP:8766/
+```
+
+If Windows Firewall blocks the other machine, run this once from an elevated PowerShell window:
+
+```powershell
+New-NetFirewallRule -DisplayName 'Free Compute LAN 8766' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8766 -Profile Any -RemoteAddress LocalSubnet
+```
+
+The remote machine does not start its own orchestrator. Point its agent at this repository, `docs/orchestrator.md`, and `docs/linux.md`, and give it the central base URL.
+
+The supervisor accepts only the exact health identity `free-compute-app` version 3. It reuses one healthy instance, replaces only an older process whose command line is verified as this checkout's orchestrator, and refuses to stop an unknown process occupying the port.
+
+For a Linux worker or another trusted LAN machine, use the [Linux guide](docs/linux.md). Linux requires Python 3.10 or newer. The guide explains direct LAN use of one central instance, the user-scoped `systemd` service, local profile overlay, and optional SSH tunneling. The [acquisition runbook](docs/acquisition.md) is the handoff for a browser-capable agent or a human completing legitimate provider setup; it does not authorize payment, eligibility misrepresentation, CAPTCHA bypass, or use of an unsafe balance.
 
 Usage monitoring has two paths. Configured provider monitors refresh automatically while the app runs. A browser, CLI, or human can also submit a redacted observation to `POST /v1/usage/observe` with an account ID and meter fields such as balance, active jobs, hourly cost, or expiry. Manual observations are append-only evidence and never become the authoritative `live` monitor snapshot required for dispatch. The app does not store API keys or authentication topology in public usage output.
 
 ## First-use account meters
 
-The catalog works before any account is connected. The optional loopback-only onboarding panel separates five facts for every account capability: connected, balance verified, zero-liability verified, policy eligible, and routable now. Older local services may report only an explicitly labelled combined readiness value. Connecting a meter never signs in, changes eligibility, adds payment, starts or stops work, or arms routing.
+The catalog works before any account is connected. The onboarding panel separates five facts for every account capability: connected, balance verified, zero-liability verified, policy eligible, and routable now. Older local services may report only an explicitly labelled combined readiness value. Connecting a meter never signs in, changes eligibility, adds payment, starts or stops work, or arms routing.
 
 Use only a method explicitly reported for that account capability: no credential; a manual reading or already-authenticated local CLI; an environment reference; an existing CLI session; a process-session-only pasted value; or an explicitly consented opaque reference. Transient values are cleared from the form immediately and are process-memory only; browser storage, catalog records, API output, and logs never retain them. A resulting opaque session reference is compatible with direct dispatch only for a configured inline-auth profile, and only while that local process remains alive. Agent-acquired material may only be represented by an explicitly consented opaque reference; acquiring, creating, rotating, or retrieving credentials requires separate user authorization. Missing authentication disables only the relevant account meter, not the catalog or other accounts.
 

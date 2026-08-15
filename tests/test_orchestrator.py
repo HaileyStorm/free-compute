@@ -781,9 +781,19 @@ class OrchestratorTests(unittest.TestCase):
         with self.assertRaisesRegex(OrchestratorError, "cannot escape"):
             validate_job(job)
 
-    def test_server_refuses_non_loopback_bind(self):
-        with self.assertRaisesRegex(OrchestratorError, "loopback"):
+    def test_server_requires_explicit_lan_bind(self):
+        with self.assertRaisesRegex(OrchestratorError, "allow-lan"):
             serve(OrchestratorState(fixture_catalog(), {}), "0.0.0.0", 8766)
+        server = mock.MagicMock()
+        with mock.patch("orchestrator.ThreadingHTTPServer", return_value=server):
+            serve(
+                OrchestratorState(fixture_catalog(), {}),
+                "0.0.0.0",
+                8766,
+                allow_lan=True,
+            )
+        server.serve_forever.assert_called_once_with()
+        server.server_close.assert_called_once_with()
 
     def test_nonfinite_resources_and_inline_job_secrets_are_rejected(self):
         job = fixture_job()
@@ -1725,6 +1735,8 @@ class OrchestratorTests(unittest.TestCase):
         self.assertNotIn("$privateValidation = @'", launcher)
         self.assertIn("--host", launcher)
         self.assertIn("--port", launcher)
+        self.assertIn("AllowLan", launcher)
+        self.assertIn("AllowLan", supervisor)
 
     def test_private_overlay_startup_rejects_forged_and_stale_catalogs(self):
         public_path = ROOT / "data" / "catalog.json"
@@ -2115,6 +2127,46 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(200, status)
         self.assertEqual("planned", body["status"])
+
+    def test_explicit_lan_handler_accepts_same_origin_full_api(self):
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0), make_handler(self.state, allow_lan=True)
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.shutdown)
+        port = server.server_port
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+        body = json.dumps(fixture_job())
+        connection.request(
+            "POST",
+            "/v1/plan",
+            body=body,
+            headers={
+                "Host": f"192.168.50.10:{port}",
+                "Origin": f"http://192.168.50.10:{port}",
+                "Content-Type": "application/json",
+            },
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+        connection.close()
+        self.assertEqual(200, response.status)
+        self.assertEqual("planned", payload["status"])
+
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+        connection.request(
+            "GET",
+            "/v1/acquisition",
+            headers={"Host": f"192.168.50.10:{port}"},
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+        connection.close()
+        self.assertEqual(200, response.status)
+        self.assertEqual("trusted_lan", payload["api"]["scope"])
 
     def test_profiles_endpoint_returns_only_minimal_public_shape(self):
         status, body = self.request("GET", "/v1/profiles")

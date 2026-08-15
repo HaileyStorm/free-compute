@@ -1,11 +1,21 @@
 param(
     [int]$Port = 8766,
+    [string]$HostAddress = '127.0.0.1',
+    [switch]$AllowLan,
     [switch]$NoBrowser
 )
 
 $ErrorActionPreference = 'Stop'
 if ($Port -lt 1 -or $Port -gt 65535) {
     throw 'Port must be between 1 and 65535.'
+}
+$parsedHost = $null
+$isLoopback = $HostAddress -eq 'localhost' -or (
+    [Net.IPAddress]::TryParse($HostAddress, [ref]$parsedHost) -and
+    [Net.IPAddress]::IsLoopback($parsedHost)
+)
+if (-not $isLoopback -and -not $AllowLan) {
+    throw 'A non-loopback HostAddress requires -AllowLan.'
 }
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $url = "http://127.0.0.1:$Port/"
@@ -30,6 +40,7 @@ function ConvertTo-ProcessTokens {
 }
 
 function Get-VerifiedListenerProcess {
+    param([switch]$AnyHost)
     $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
     if ($listeners.Count -ne 1) { return $null }
     $process = Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f $listeners[0].OwningProcess) -ErrorAction SilentlyContinue
@@ -50,7 +61,7 @@ function Get-VerifiedListenerProcess {
     if (
         $serveIndex + 4 -ge $tokens.Count -or
         $tokens[$serveIndex + 1] -ne '--host' -or
-        $tokens[$serveIndex + 2] -ne '127.0.0.1' -or
+        (-not $AnyHost -and $tokens[$serveIndex + 2] -ne $HostAddress) -or
         $tokens[$serveIndex + 3] -ne '--port' -or
         $tokens[$serveIndex + 4] -ne [string]$Port
     ) {
@@ -60,7 +71,7 @@ function Get-VerifiedListenerProcess {
 }
 
 function Stop-VerifiedStaleApp {
-    $process = Get-VerifiedListenerProcess
+    $process = Get-VerifiedListenerProcess -AnyHost
     if ($null -eq $process) {
         throw "Port $Port is occupied by an unverified process. Refusing to stop it or start another app."
     }
@@ -82,7 +93,8 @@ if ($null -ne $existing) {
         $existing.StatusCode -eq 200 -and
         $health.service -eq 'free-compute-app' -and
         $health.status -eq 'ok' -and
-        $health.version -eq 3
+        $health.version -eq 3 -and
+        (Get-VerifiedListenerProcess)
     ) {
         if (-not $NoBrowser) { Start-Process $url }
         Write-Output "Free Compute app is already available at $url"
@@ -133,8 +145,9 @@ $arguments = @(
     ('"{0}"' -f $orchestrator),
     '--catalog', ('"{0}"' -f $catalog),
     '--runtime-state', ('"{0}"' -f $runtimeState),
-    'serve', '--host', '127.0.0.1', '--port', $Port
+    'serve', '--host', $HostAddress, '--port', $Port
 )
+if ($AllowLan) { $arguments += '--allow-lan' }
 $server = Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden -PassThru
 try {
     $ready = $false

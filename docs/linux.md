@@ -1,6 +1,6 @@
 # Linux control endpoint
 
-Free Compute is a local control plane. Run it on the Linux host that will perform the work and let local agents call `http://127.0.0.1:8766`. It deliberately rejects LAN and Internet binds: the API can arm and dispatch work and currently has no remote-client authentication.
+Free Compute is one control plane. It defaults to `127.0.0.1`, but an explicitly trusted LAN client can use every browser and API feature from the central instance without starting another orchestrator.
 
 ## Clone and verify
 
@@ -89,7 +89,32 @@ systemctl --user restart free-compute.service
 
 To update, stop the service, review `git pull --ff-only`, run the verification commands above, then start it again. Do not run hosted GitHub Actions for this repository.
 
-## Safe remote access: SSH forwarding
+## Direct trusted-LAN access
+
+On the central host, bind explicitly to its LAN interfaces:
+
+```bash
+mkdir -p ~/.config/free-compute
+cat >~/.config/free-compute/service.env <<'EOF'
+FREE_COMPUTE_HOST=0.0.0.0
+FREE_COMPUTE_ALLOW_LAN=1
+EOF
+systemctl --user restart free-compute.service
+```
+
+From another machine, replace `SERVER_LAN_IP` with the central host's private IP:
+
+```bash
+curl --fail http://SERVER_LAN_IP:8766/health
+python3 scripts/free_compute_client.py \
+  --url http://SERVER_LAN_IP:8766 --allow-lan acquisition
+```
+
+The browser can open `http://SERVER_LAN_IP:8766/` and receives the same UI and all `/v1/*` controls. The client accepts direct LAN URLs only with `--allow-lan` (or `FREE_COMPUTE_ALLOW_LAN=1`) and only when the URL uses a private or link-local IP. The server still rejects forwarded and cross-origin browser requests. This mode has no separate credential and should be used only on a LAN whose clients are trusted.
+
+To hand work to an agent on that machine, point it at this GitHub repository, `docs/orchestrator.md`, and this file. Tell it the central base URL; it should run `free_compute_client.py --url ... --allow-lan` rather than start `linux_start.sh`.
+
+## Optional SSH forwarding
 
 For a browser or agent on another trusted machine, leave the service on Linux loopback and forward it over an authenticated SSH connection:
 
@@ -100,7 +125,7 @@ ssh -N -L 8766:127.0.0.1:8766 linux-host
 curl --fail --silent --show-error http://127.0.0.1:8766/health
 ```
 
-The tunnel makes the Linux service appear at the client's `127.0.0.1:8766`; the browser UI will therefore retain its same-origin loopback behavior. `free_compute_client.py --url` accepts only a loopback URL, including this tunnel; it has no direct remote HTTPS endpoint mode. Do not use `--host 0.0.0.0`, a public reverse proxy, or a port-forward that exposes the service to a shared network.
+The tunnel remains useful when the LAN is not trusted. It makes the central service appear at the client's `127.0.0.1:8766`; no second orchestrator is started.
 
 ## Agent/API flow
 

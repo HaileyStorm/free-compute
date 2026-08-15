@@ -1,12 +1,15 @@
-# Unified loopback app and orchestrator
+# Unified app and orchestrator
 
-Free Compute uses one loopback service for the browser app and the JSON control API. `scripts/orchestrator.py` validates portable jobs, ranks zero-liability compute and storage, maintains temporary arm state, and dispatches only through an explicitly enabled local adapter. It does not create provider accounts, change billing, add payment details, enable paid fallback, or turn an advertised offer into acquired capacity.
+Free Compute uses one service for the browser app and JSON control API. It defaults to loopback and can be explicitly shared on a trusted LAN. `scripts/orchestrator.py` validates portable jobs, ranks zero-liability compute and storage, maintains temporary arm state, and dispatches only through an explicitly enabled adapter. It does not create provider accounts, change billing, add payment details, enable paid fallback, or turn an advertised offer into acquired capacity.
 
 Use `./start_app.ps1` for the normal app experience. For API or CLI work:
 
 ```powershell
-# Unified loopback service
+# Unified service (loopback default)
 py scripts/orchestrator.py serve --host 127.0.0.1 --port 8766
+
+# Trusted-LAN service; every browser and API feature uses this same instance
+py scripts/orchestrator.py serve --host 0.0.0.0 --port 8766 --allow-lan
 
 # Read-only planning and redacted summaries
 py scripts/orchestrator.py plan --job .\specs\example-job.json
@@ -14,7 +17,7 @@ py scripts/orchestrator.py ledger
 py scripts/orchestrator.py profiles
 ```
 
-Binding beyond loopback is unsafe without a separately reviewed authentication and network boundary. A publishable ledger is not permission to expose the dispatch surface.
+Non-loopback binding is refused unless `--allow-lan` is present. In LAN mode, browser requests must remain same-origin and forwarded requests remain rejected. There is no separate LAN credential: use this only on a network whose clients you trust. Point an agent at this repository, this document, and `docs/linux.md`; it can use the full API at `http://SERVER_LAN_IP:8766` without starting another orchestrator.
 
 ## Friendly control flow
 

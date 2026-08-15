@@ -35,14 +35,22 @@ class FakeResponse:
 
 
 class LinuxToolTests(unittest.TestCase):
-    def test_base_url_requires_loopback_http_or_https(self):
+    def test_base_url_requires_loopback_or_explicit_private_lan(self):
         self.assertEqual("http://127.0.0.1:8766", client.normalize_base_url("http://127.0.0.1:8766/"))
         self.assertEqual("https://localhost:8766", client.normalize_base_url("https://localhost:8766"))
         self.assertEqual("http://127.0.0.2:8766", client.normalize_base_url("http://127.0.0.2:8766"))
+        self.assertEqual(
+            "http://192.168.50.10:8766",
+            client.normalize_base_url(
+                "http://192.168.50.10:8766", allow_lan=True
+            ),
+        )
         with self.assertRaises(client.ClientError):
-            client.normalize_base_url("http://compute.example.test")
+            client.normalize_base_url("http://192.168.50.10:8766")
         with self.assertRaises(client.ClientError):
-            client.normalize_base_url("https://compute.example.test")
+            client.normalize_base_url("http://compute.example.test", allow_lan=True)
+        with self.assertRaises(client.ClientError):
+            client.normalize_base_url("https://8.8.8.8", allow_lan=True)
         with self.assertRaises(client.ClientError):
             client.normalize_base_url("https://user:pass@compute.example.test")
 
@@ -200,12 +208,13 @@ class LinuxToolTests(unittest.TestCase):
         self.assertEqual(("GET", "/v1/arm", None), calls[2])
         self.assertEqual(("POST", "/v1/arm/auto", {"job": {"schema_version": 1, "job_id": "job"}}), calls[3])
 
-    def test_linux_scripts_remain_loopback_and_smoke_has_no_dispatch_call(self):
+    def test_linux_scripts_require_explicit_lan_and_smoke_has_no_dispatch_call(self):
         start = (ROOT / "scripts" / "linux_start.sh").read_text(encoding="utf-8")
         smoke = (ROOT / "scripts" / "linux_smoke.sh").read_text(encoding="utf-8")
         service = (ROOT / "scripts" / "install_linux_user_service.sh").read_text(encoding="utf-8")
         self.assertIn("FREE_COMPUTE_HOST=127.0.0.1", service)
-        self.assertIn("FREE_COMPUTE_HOST must remain loopback", start)
+        self.assertIn("FREE_COMPUTE_ALLOW_LAN=1", start)
+        self.assertIn("EnvironmentFile=", service)
         self.assertIn("catalog.private.json", start)
         self.assertNotIn('"/v1/dispatch"', smoke)
         self.assertIn("free-compute.service", service)

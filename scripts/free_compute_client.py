@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Small stdlib client for a loopback Free Compute API.
+"""Small stdlib client for a local or explicitly enabled LAN Free Compute API.
 
 Secrets are accepted only from an environment variable or standard input. The
-client accepts only loopback HTTP(S), including a local SSH tunnel.
+client accepts loopback by default and private/link-local IPs with --allow-lan.
 """
 
 from __future__ import annotations
@@ -46,14 +46,19 @@ def _is_loopback(host: str | None) -> bool:
         return False
 
 
-def normalize_base_url(value: str) -> str:
+def normalize_base_url(value: str, *, allow_lan: bool = False) -> str:
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ClientError("--url must be an absolute http(s) URL")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ClientError("--url cannot contain credentials, a query, or a fragment")
     if not _is_loopback(parsed.hostname):
-        raise ClientError("--url must be loopback; use an SSH tunnel for a remote host")
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+        except ValueError as exc:
+            raise ClientError("LAN URLs must use an explicit private or link-local IP address") from exc
+        if not allow_lan or not (address.is_private or address.is_link_local):
+            raise ClientError("non-loopback --url requires --allow-lan and a private/link-local IP")
     return value.rstrip("/")
 
 
@@ -199,7 +204,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--url",
         default=os.environ.get("FREE_COMPUTE_BASE_URL", DEFAULT_BASE_URL),
-        help="loopback API URL, optionally through an SSH tunnel (default: %(default)s)",
+        help="API URL; loopback by default (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--allow-lan",
+        action="store_true",
+        default=os.environ.get("FREE_COMPUTE_ALLOW_LAN") == "1",
+        help="permit a direct private/link-local LAN API URL",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     for command in ("health", "ledger", "usage", "onboarding", "profiles", "storage"):
@@ -257,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        base_url = normalize_base_url(args.url)
+        base_url = normalize_base_url(args.url, allow_lan=args.allow_lan)
         simple_routes = {
             "health": "/health",
             "ledger": "/v1/ledger",

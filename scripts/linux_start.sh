@@ -7,6 +7,7 @@ root_dir="$(cd -- "${script_dir}/.." && pwd -P)"
 python_bin="${PYTHON_BIN:-python3}"
 host="${FREE_COMPUTE_HOST:-127.0.0.1}"
 port="${FREE_COMPUTE_PORT:-8766}"
+allow_lan="${FREE_COMPUTE_ALLOW_LAN:-0}"
 if [[ -n "${FREE_COMPUTE_CATALOG:-}" ]]; then
   catalog="${FREE_COMPUTE_CATALOG}"
 elif [[ -f "${root_dir}/data/catalog.private.json" ]]; then
@@ -20,8 +21,10 @@ runtime_state="${FREE_COMPUTE_RUNTIME_STATE:-${root_dir}/orchestrator/state/usag
 case "${host}" in
   127.0.0.1|localhost|::1) ;;
   *)
-    printf '%s\n' 'FREE_COMPUTE_HOST must remain loopback. Use an SSH tunnel or HTTPS reverse proxy with separate authentication.' >&2
-    exit 2
+    if [[ "${allow_lan}" != "1" ]]; then
+      printf '%s\n' 'A non-loopback FREE_COMPUTE_HOST requires FREE_COMPUTE_ALLOW_LAN=1.' >&2
+      exit 2
+    fi
     ;;
 esac
 
@@ -39,8 +42,12 @@ if ! command -v "${python_bin}" >/dev/null 2>&1; then
 fi
 
 mkdir -p -- "$(dirname -- "${runtime_state}")"
+lan_args=()
+if [[ "${allow_lan}" == "1" ]]; then
+  lan_args+=(--allow-lan)
+fi
 exec "${python_bin}" "${script_dir}/orchestrator.py" \
   --catalog "${catalog}" \
   --profiles "${profiles}" \
   --runtime-state "${runtime_state}" \
-  serve --host "${host}" --port "${port}"
+  serve --host "${host}" --port "${port}" "${lan_args[@]}"

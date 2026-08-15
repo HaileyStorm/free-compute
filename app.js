@@ -35,7 +35,7 @@ const COMPUTE_BACKENDS = new Set(["any", "cuda", "tpu", "rocm", "oneapi", "cpu"]
 const STORAGE_SAFETY = new Set(["confirmed_free", "conditional_free", "credit_consuming", "payment_required_blocked", "terms_unverified", "unknown"]);
 const LIVE_POLL_MS = 30_000;
 const API_BASE = (() => {
-  if (!/^https?:$/.test(window.location.protocol) || !["127.0.0.1", "localhost", "::1", "[::1]"].includes(window.location.hostname)) return null;
+  if (!/^https?:$/.test(window.location.protocol)) return null;
   return window.location.origin;
 })();
 const state = {
@@ -1770,7 +1770,7 @@ class ApiRequestError extends Error {
 }
 
 async function apiRequest(path, { method = "GET", body } = {}) {
-  if (!API_BASE) throw new ApiRequestError("Live controls require the loopback Free Compute app.");
+  if (!API_BASE) throw new ApiRequestError("Live controls require the Free Compute app.");
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 7_000);
   try {
@@ -1795,7 +1795,7 @@ async function apiRequest(path, { method = "GET", body } = {}) {
   } catch (error) {
     if (error instanceof ApiRequestError) throw error;
     if (error.name === "AbortError") throw new ApiRequestError("Live API request timed out.");
-    throw new ApiRequestError("Loopback API could not be reached.");
+    throw new ApiRequestError("Free Compute API could not be reached.");
   } finally {
     window.clearTimeout(timeout);
   }
@@ -2388,11 +2388,16 @@ async function loadCatalog() {
     let catalog = null;
     let loadedSource = null;
     if (API_BASE) {
-      const ledger = await apiRequest("/v1/ledger");
-      catalog = ledger.catalog;
-      loadedSource = "/v1/ledger";
-      if (!catalog || typeof catalog !== "object") throw new Error("ledger did not include a catalog");
-    } else {
+      try {
+        const ledger = await apiRequest("/v1/ledger");
+        catalog = ledger.catalog;
+        loadedSource = "/v1/ledger";
+        if (!catalog || typeof catalog !== "object") throw new Error("ledger did not include a catalog");
+      } catch (error) {
+        if (!endpointUnavailable(error)) throw error;
+      }
+    }
+    if (!catalog) {
       const response = await fetch("data/catalog.json", { cache: "no-store" });
       if (!response.ok) throw new Error(`data/catalog.json: HTTP ${response.status}`);
       catalog = await response.json();

@@ -1,5 +1,7 @@
 param(
     [int]$Port = 8766,
+    [string]$HostAddress = '127.0.0.1',
+    [switch]$AllowLan,
     [int]$RestartDelaySeconds = 3
 )
 
@@ -21,7 +23,8 @@ while ($true) {
             $response.StatusCode -eq 200 -and
             $health.service -eq 'free-compute-app' -and
             $health.status -eq 'ok' -and
-            $health.version -eq 3
+            $health.version -eq 3 -and
+            (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Where-Object LocalAddress -eq $HostAddress)
         ) {
             Start-Sleep -Seconds 5
             continue
@@ -32,7 +35,7 @@ while ($true) {
     }
 
     try {
-        & $launcher -Port $Port -NoBrowser
+        & $launcher -Port $Port -HostAddress $HostAddress -AllowLan:$AllowLan -NoBrowser
     }
     catch {
         Write-Warning ("Free Compute app launch failed: {0}" -f $_.Exception.Message)

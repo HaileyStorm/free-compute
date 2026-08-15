@@ -25,6 +25,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import urljoin, urlsplit
 
+import local_catalog
 from validate_catalog import validate_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +38,9 @@ MAX_TEXT_LENGTH = 64 * 1024
 MAX_ARM_MINUTES = 7 * 24 * 60
 MIN_MONITOR_SECONDS = 15
 MAX_MONITOR_AGE_SECONDS = 15 * 60
+MAX_PRIVATE_OBSERVATION_RESEARCH_AGE_DAYS = 7
+COMMAND_TIMEOUT_BUFFER_SECONDS = 120
+MAX_COMMAND_TIMEOUT_SECONDS = 24 * 60 * 60 + COMMAND_TIMEOUT_BUFFER_SECONDS
 MAX_IDEMPOTENCY_TOMBSTONES = 4096
 MAX_METER_EVENTS = 4096
 IDEMPOTENCY_RETENTION_DAYS = 30
@@ -157,6 +161,49 @@ def read_json(path: Path) -> Any:
             return json.load(handle, parse_constant=_reject_json_constant)
     except (OSError, ValueError) as exc:
         raise OrchestratorError("catalog_unavailable", f"Could not read {path}: {exc}") from exc
+
+
+def validate_private_catalog_overlay(catalog_path: Path, catalog: Any) -> None:
+    """Reject a private catalog unless it still exactly binds to this checkout's public base."""
+    if not isinstance(catalog, dict):
+        return
+    canonical_private = (ROOT / "data" / "catalog.private.json").resolve()
+    try:
+        selected_private = catalog_path.resolve() == canonical_private
+    except OSError as exc:
+        raise OrchestratorError("catalog_unavailable", f"Could not resolve {catalog_path}: {exc}") from exc
+
+    def has_private_field(value: Any) -> bool:
+        if isinstance(value, dict):
+            return any(
+                (isinstance(key, str) and key.startswith("private_")) or has_private_field(child)
+                for key, child in value.items()
+            )
+        return isinstance(value, list) and any(has_private_field(child) for child in value)
+
+    if not selected_private and not has_private_field(catalog):
+        return
+    overlay = catalog.get("private_overlay")
+    if not isinstance(overlay, dict):
+        raise OrchestratorError(
+            "invalid_catalog",
+            "Private catalog fields require a valid private overlay; runtime was not started",
+            status=503,
+        )
+    if overlay.get("base_catalog_path") != "data/catalog.json":
+        raise OrchestratorError("invalid_catalog", "Private catalog has an unexpected public base path", status=503)
+    public_path = (ROOT / "data" / "catalog.json").resolve()
+    try:
+        public_path.relative_to(ROOT.resolve())
+        if not public_path.is_file():
+            raise OSError("canonical public catalog is unavailable")
+        local_catalog.validate_runtime_overlay(catalog_path.resolve(), public_path)
+    except (local_catalog.LocalCatalogError, OSError) as exc:
+        raise OrchestratorError(
+            "invalid_catalog",
+            "Private catalog overlay validation failed; runtime was not started: " + str(exc),
+            status=503,
+        ) from exc
 
 
 def canonical_json(value: Any) -> str:
@@ -304,6 +351,8 @@ def validate_job(raw: Any) -> dict[str, Any]:
             or value < 0
         ):
             raise OrchestratorError("invalid_job", f"resources.{key} must be finite and nonnegative")
+        if key == "max_runtime_minutes" and value is not None and value > 24 * 60:
+            raise OrchestratorError("invalid_job", "resources.max_runtime_minutes cannot exceed 1440")
     interruption = resources.get("interruptibility", "allowed")
     if not isinstance(interruption, str) or interruption not in {"allowed", "forbidden", "required"}:
         raise OrchestratorError("invalid_job", "resources.interruptibility is invalid")
@@ -476,6 +525,45 @@ def _redact_secrets(value: Any) -> Any:
     return value
 
 
+def public_catalog_view(catalog: dict[str, Any]) -> dict[str, Any]:
+    """Project an optional local overlay into a catalog safe for loopback API clients."""
+    projected = json.loads(canonical_json(catalog))
+    projected.pop("private_overlay", None)
+    accounts = projected.get("accounts")
+    if not isinstance(accounts, list):
+        return projected
+    public_observation_fields = {
+        "observed_at",
+        "balance",
+        "balance_unit",
+        "payment_state",
+        "hard_stop",
+        "paid_fallback_allowed",
+    }
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        observation = account.get("private_observation")
+        if not isinstance(observation, dict):
+            continue
+        account["private_observation"] = {
+            key: observation[key] for key in public_observation_fields if key in observation
+        }
+        effective = _account_private_observation(account)
+        if effective is not None:
+            account.update(
+                {
+                    "balance": effective["balance"],
+                    "balance_unit": effective["balance_unit"],
+                    "balance_as_of": effective["observed_at"],
+                    "payment_state": effective["payment_state"],
+                    "hard_stop": True,
+                    "paid_fallback_allowed": False,
+                }
+            )
+    return projected
+
+
 def public_profile_summary(profile: dict[str, Any]) -> dict[str, Any]:
     monitor = _monitor_config(profile)
     planner_only = profile.get("adapter") == "claude_code"
@@ -494,18 +582,28 @@ def public_profile_summary(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def account_is_zero_liability(account: dict[str, Any]) -> tuple[bool, tuple[str, ...]]:
+def account_is_zero_liability(
+    account: dict[str, Any], usage: dict[str, Any] | None = None
+) -> tuple[bool, tuple[str, ...]]:
     reasons: list[str] = []
+    balance, _unit, _observed_at, balance_source = _effective_account_balance(account, usage)
+    observation = _account_private_observation(account)
+    safety = observation or account
     if account.get("acquired_safe") is not True:
         reasons.append("account is not marked acquired_safe")
-    if account.get("hard_stop") is not True:
+    if safety.get("hard_stop") is not True:
         reasons.append("provider hard stop is not confirmed")
-    if account.get("payment_state") not in SAFE_PAYMENT_STATES:
+    if safety.get("payment_state") not in SAFE_PAYMENT_STATES:
         reasons.append("payment state is not zero-liability")
-    if account.get("paid_fallback_allowed") is not False:
+    if safety.get("paid_fallback_allowed") is not False:
         reasons.append("paid fallback is not explicitly disabled")
     if account.get("status") != "ready":
         reasons.append("account is not ready")
+    if balance_source == "private_observation" and isinstance(balance, (int, float)) and balance <= 0:
+        reasons.append("private account observation has no available balance")
+    elif balance_source == "live_monitor" and isinstance(balance, (int, float)) and balance <= 0:
+        reasons.append("live monitor has no available balance")
+    reasons.extend(_live_quota_reasons(usage))
     return not reasons, tuple(reasons)
 
 
@@ -1148,7 +1246,17 @@ def _dispatch_command(job: dict[str, Any], profile: dict[str, Any]) -> dict[str,
     command = profile.get("command")
     if not isinstance(command, list) or not command or not all(isinstance(arg, str) for arg in command):
         raise OrchestratorError("invalid_config", "Command profile needs a nonempty argv list")
-    timeout = min(max(float(profile.get("timeout_seconds", 600)), 1), 3600)
+    resources = job.get("resources") if isinstance(job.get("resources"), dict) else {}
+    runtime_minutes = float(resources.get("max_runtime_minutes") or 0)
+    runtime_timeout = (
+        runtime_minutes * 60 + COMMAND_TIMEOUT_BUFFER_SECONDS
+        if runtime_minutes > 0
+        else 0
+    )
+    timeout = min(
+        max(float(profile.get("timeout_seconds", 600)), runtime_timeout, 1),
+        MAX_COMMAND_TIMEOUT_SECONDS,
+    )
     try:
         completed = subprocess.run(
             command,
@@ -1177,6 +1285,8 @@ def _dispatch_command(job: dict[str, Any], profile: dict[str, Any]) -> dict[str,
         result["stdout"] = _redact_text(stdout)
     else:
         result["output"] = _redact_secrets(parsed_stdout)
+        if isinstance(parsed_stdout, dict) and parsed_stdout.get("status") == "ambiguous":
+            result["provider_outcome"] = "ambiguous"
     return result
 
 
@@ -1209,7 +1319,25 @@ def _catalog_freshness_reasons(catalog: dict[str, Any]) -> list[str]:
     return []
 
 
-def _account_freshness_reasons(account: dict[str, Any]) -> list[str]:
+def _account_freshness_reasons(
+    account: dict[str, Any], usage: dict[str, Any] | None = None
+) -> list[str]:
+    _balance, _unit, observed_at, source = _effective_account_balance(account, usage)
+    if source in {"private_observation", "live_monitor"}:
+        value = observed_at
+        try:
+            observed = date.fromisoformat(value)
+        except (TypeError, ValueError):
+            try:
+                observed = datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+            except ValueError:
+                return [f"{source.replace('_', ' ')} date is invalid"]
+        today = _local_today()
+        if observed > today:
+            return [f"{source.replace('_', ' ')} date is in the future"]
+        if observed != today:
+            return [f"{source.replace('_', ' ')} is stale; verify it for {today.isoformat()}"]
+        return []
     candidates: list[date] = []
     invalid = False
     values = [account.get("balance_as_of")]
@@ -1235,6 +1363,244 @@ def _account_freshness_reasons(account: dict[str, Any]) -> list[str]:
     if freshest != today:
         return [f"account meter observation is stale; verify it for {today.isoformat()}"]
     return []
+
+
+def _account_private_observation(account: dict[str, Any]) -> dict[str, Any] | None:
+    """Accept only the small, complete local overlay shape; otherwise retain public evidence."""
+    observation = account.get("private_observation")
+    if not isinstance(observation, dict):
+        return None
+    required = {
+        "observed_at",
+        "balance",
+        "balance_unit",
+        "payment_state",
+        "hard_stop",
+        "paid_fallback_allowed",
+    }
+    if not required.issubset(observation):
+        return None
+    if not isinstance(observation["observed_at"], str):
+        return None
+    if not isinstance(observation["balance"], (int, float)) or isinstance(observation["balance"], bool):
+        return None
+    if not math.isfinite(float(observation["balance"])) or observation["balance"] < 0:
+        return None
+    if not isinstance(observation["balance_unit"], str) or not observation["balance_unit"].strip():
+        return None
+    if observation["payment_state"] not in SAFE_PAYMENT_STATES:
+        return None
+    if observation["hard_stop"] is not True or observation["paid_fallback_allowed"] is not False:
+        return None
+    return {
+        "observed_at": observation["observed_at"],
+        "balance": observation["balance"],
+        "balance_unit": observation["balance_unit"],
+        "payment_state": observation["payment_state"],
+        "hard_stop": True,
+        "paid_fallback_allowed": False,
+    }
+
+
+def _observed_date(value: Any) -> date | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
+
+
+def _live_quota_reasons(usage: dict[str, Any] | None) -> list[str]:
+    if not isinstance(usage, dict) or usage.get("status") != "live":
+        return []
+    available_h100e = usage.get("available_h100e")
+    if isinstance(available_h100e, (int, float)) and not isinstance(available_h100e, bool):
+        if math.isfinite(float(available_h100e)) and available_h100e <= 0:
+            return ["live monitor reports no H100e available"]
+    meters = usage.get("meters")
+    if isinstance(meters, list):
+        for meter in meters:
+            if not isinstance(meter, dict):
+                continue
+            available = meter.get("available")
+            if isinstance(available, (int, float)) and not isinstance(available, bool):
+                if math.isfinite(float(available)) and available <= 0:
+                    return ["live monitor reports an exhausted available quota"]
+    return []
+
+
+def _effective_account_balance(
+    account: dict[str, Any], usage: dict[str, Any] | None = None
+) -> tuple[Any, Any, Any, str]:
+    observation = _account_private_observation(account)
+    live = usage if isinstance(usage, dict) and usage.get("status") == "live" else None
+    live_balance = live.get("balance") if live is not None else None
+    live_unit = live.get("balance_unit") if live is not None else None
+    live_date = _observed_date(live.get("observed_at")) if live is not None else None
+    live_valid = (
+        isinstance(live_balance, (int, float))
+        and not isinstance(live_balance, bool)
+        and math.isfinite(float(live_balance))
+        and isinstance(live_unit, str)
+        and bool(live_unit.strip())
+        and live_date is not None
+    )
+    private_date = _observed_date(observation["observed_at"]) if observation is not None else None
+    if live_valid and (private_date is None or live_date >= private_date):
+        return live_balance, live_unit, live.get("observed_at"), "live_monitor"
+    if observation is not None:
+        return (
+            observation["balance"],
+            observation["balance_unit"],
+            observation["observed_at"],
+            "private_observation",
+        )
+    if isinstance(usage, dict):
+        return (
+            usage.get("balance", account.get("balance")),
+            usage.get("balance_unit", account.get("balance_unit")),
+            usage.get("observed_at", account.get("balance_as_of")),
+            "usage_observation",
+        )
+    return (
+        account.get("balance"),
+        account.get("balance_unit"),
+        account.get("balance_as_of"),
+        "catalog",
+    )
+
+
+def _selected_account_freshness_reasons(
+    catalog: dict[str, Any], account: dict[str, Any], usage: dict[str, Any] | None = None
+) -> list[str]:
+    """Permit only a same-day local meter to bridge a recent stale public snapshot."""
+    catalog_reasons = _catalog_freshness_reasons(catalog)
+    account_reasons = _account_freshness_reasons(account, usage)
+    if not catalog_reasons:
+        return account_reasons
+    observation = _account_private_observation(account)
+    if observation is None or account_reasons:
+        return [*catalog_reasons, *account_reasons]
+    if any("missing or invalid" in reason or "future" in reason for reason in catalog_reasons):
+        return [*catalog_reasons, *account_reasons]
+    raw_research = catalog.get("research_retrieved_as_of")
+    try:
+        research_date = date.fromisoformat(raw_research) if isinstance(raw_research, str) else None
+    except ValueError:
+        research_date = None
+    today = _local_today()
+    if research_date is None:
+        return [
+            "catalog research retrieval date is missing or invalid; private account observation cannot bridge it"
+        ]
+    if research_date > today:
+        return ["catalog research retrieval date is in the future; private account observation cannot bridge it"]
+    age_days = (today - research_date).days
+    if age_days > MAX_PRIVATE_OBSERVATION_RESEARCH_AGE_DAYS:
+        return [
+            "catalog research is older than "
+            f"{MAX_PRIVATE_OBSERVATION_RESEARCH_AGE_DAYS} days; private account observation cannot bridge it"
+        ]
+    return []
+
+
+def _private_observation_bridge_applies(
+    catalog: dict[str, Any], account: dict[str, Any], usage: dict[str, Any] | None = None
+) -> bool:
+    return bool(
+        _catalog_freshness_reasons(catalog)
+        and _account_private_observation(account) is not None
+        and not _selected_account_freshness_reasons(catalog, account, usage)
+    )
+
+
+def _source_freshness_reasons(item: dict[str, Any]) -> list[str]:
+    """Return the source-date gate for an acquisition action, without guessing terms."""
+    sources = item.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return ["official terms retrieval date is missing"]
+    dates: list[date] = []
+    invalid = False
+    for source in sources:
+        if not isinstance(source, dict):
+            invalid = True
+            continue
+        value = source.get("verified_on")
+        if not isinstance(value, str):
+            invalid = True
+            continue
+        try:
+            dates.append(date.fromisoformat(value))
+        except ValueError:
+            invalid = True
+    if invalid or not dates:
+        return ["official terms retrieval date is missing or invalid"]
+    today = _local_today()
+    newest = max(dates)
+    if newest > today:
+        return ["official terms retrieval date is in the future"]
+    if newest != today:
+        return [f"official terms are stale; retrieve them for {today.isoformat()}"]
+    return []
+
+
+def _public_links(item: dict[str, Any]) -> list[dict[str, str]]:
+    """Keep only public HTTP(S) links from the redacted catalog."""
+    candidates: list[tuple[Any, Any]] = []
+    for link in item.get("links", []):
+        if isinstance(link, dict):
+            candidates.append((link.get("label"), link.get("url")))
+    for source in item.get("sources", []):
+        if isinstance(source, dict):
+            candidates.append(("Official source", source.get("url")))
+    links: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for label, raw_url in candidates:
+        if not isinstance(raw_url, str) or raw_url in seen:
+            continue
+        parsed = urlsplit(raw_url)
+        if (
+            parsed.scheme not in {"https", "http"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            continue
+        seen.add(raw_url)
+        links.append(
+            {
+                "label": label if isinstance(label, str) and label else "Official provider link",
+                "url": raw_url,
+            }
+        )
+    return links
+
+
+def _acquisition_hard_stops() -> list[dict[str, str]]:
+    return [
+        {"condition": "payment_method_or_hold", "action": "stop", "reason": "Do not add a payment method, accept a hold, or deposit funds."},
+        {"condition": "paid_fallback_or_auto_upgrade", "action": "stop", "reason": "A provider-enforced hard stop is required; alerts and manual shutdown are insufficient."},
+        {"condition": "captcha_mfa_or_phone_verification", "action": "human_handoff", "reason": "Do not bypass interactive anti-abuse or identity checks."},
+        {"condition": "eligibility_unclear", "action": "human_handoff", "reason": "Use only truthful, user-provided eligibility facts."},
+        {"condition": "credentials_or_personal_data_requested", "action": "stop", "reason": "Never persist or echo secrets, tokens, OTPs, or personal identifiers."},
+        {"condition": "duplicate_account_or_terms_conflict", "action": "stop", "reason": "Do not create duplicate accounts, evade region rules, or misrepresent eligibility."},
+    ]
+
+
+def _acquisition_action_mode(status: Any, zero_liability: bool) -> str:
+    if status == "blocked_payment":
+        return "blocked"
+    if status in {"blocked_auth", "grant_application"}:
+        return "human_or_browser_assisted"
+    if zero_liability:
+        return "browser_or_computer_use"
+    return "evidence_first"
 
 
 def _parse_iso(value: Any, path: str, *, code: str = "invalid_arm") -> datetime:
@@ -1800,14 +2166,26 @@ class OrchestratorState:
 
     @staticmethod
     def _balance_verified(account: dict[str, Any], usage: dict[str, Any] | None) -> bool:
+        value, unit, _observed_at, source = _effective_account_balance(account, usage)
+        if source in {"private_observation", "live_monitor"}:
+            return bool(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+                and float(value) > 0
+                and isinstance(unit, str)
+                and bool(unit.strip())
+                and not _account_freshness_reasons(account, usage)
+            )
         snapshot = usage or {}
-        value = snapshot.get("balance", account.get("balance"))
-        unit = snapshot.get("balance_unit", account.get("balance_unit"))
+        value = snapshot.get("balance", value)
+        unit = snapshot.get("balance_unit", unit)
         observed = snapshot.get("status") in {"live", "observed"} or bool(account.get("balance_as_of"))
         return (
             isinstance(value, (int, float))
             and not isinstance(value, bool)
             and math.isfinite(float(value))
+            and float(value) > 0
             and isinstance(unit, str)
             and bool(unit.strip())
             and observed
@@ -1826,7 +2204,9 @@ class OrchestratorState:
             account = accounts.get(account_id, {})
             connected = self._connection_is_available(profile_id, profile)
             balance_verified = self._balance_verified(account, self.usage.get(account_id))
-            zero_liability_verified = bool(account) and account_is_zero_liability(account)[0]
+            zero_liability_verified = bool(account) and account_is_zero_liability(
+                account, self.usage.get(account_id)
+            )[0]
             policy_eligible = (
                 profile.get("enabled") is True
                 and profile.get("allow_dispatch") is True
@@ -1866,7 +2246,9 @@ class OrchestratorState:
             slot = self._profile_connection(profile_id)
             connected = self._connection_is_available(profile_id, profile)
             balance_verified = self._balance_verified(account, self.usage.get(account_id))
-            zero_liability_verified = bool(account) and account_is_zero_liability(account)[0]
+            zero_liability_verified = bool(account) and account_is_zero_liability(
+                account, self.usage.get(account_id)
+            )[0]
             policy_eligible = (
                 profile.get("enabled") is True
                 and profile.get("allow_dispatch") is True
@@ -1891,7 +2273,9 @@ class OrchestratorState:
             if account_id in configured_account_ids:
                 continue
             balance_verified = self._balance_verified(account, self.usage.get(account_id))
-            zero_liability_verified = account_is_zero_liability(account)[0]
+            zero_liability_verified = account_is_zero_liability(
+                account, self.usage.get(account_id)
+            )[0]
             readiness.append(
                 {
                     "profile_id": self._catalog_onboarding_id(account_id),
@@ -1943,6 +2327,237 @@ class OrchestratorState:
             "credential_methods": sorted(ONBOARDING_CREDENTIAL_METHODS),
             "readiness": readiness,
             "checklist": checklist,
+        }
+
+    def acquisition_view(self) -> dict[str, Any]:
+        """Expose redacted, evidence-first acquisition work for local automation clients."""
+        catalog_reasons = _catalog_freshness_reasons(self.catalog)
+        required_evidence = [
+            "official_terms_url",
+            "terms_retrieved_on",
+            "truthful_eligibility_confirmed",
+            "payment_method_not_required",
+            "no_payment_method_or_hold",
+            "paid_fallback_disabled",
+            "provider_enforced_hard_stop",
+            "post_action_zero_liability_readback",
+        ]
+
+        def target(
+            item: dict[str, Any],
+            *,
+            kind: str,
+            zero_liability: bool,
+            liability_reasons: tuple[str, ...],
+            freshness_reasons: list[str],
+        ) -> dict[str, Any]:
+            status = item.get("status")
+            action_blockers = [*freshness_reasons, *liability_reasons]
+            if status == "blocked_payment":
+                action_state = "blocked_payment"
+            elif status in {"blocked_auth", "grant_application"}:
+                action_state = "human_evidence_required"
+            elif action_blockers:
+                action_state = "refresh_or_evidence_required"
+            elif zero_liability:
+                action_state = "safe_to_prepare"
+            else:
+                action_state = "evidence_required"
+            target_evidence = list(required_evidence)
+            if kind == "account":
+                target_evidence.extend(["current_balance", "balance_unit", "balance_observed_on"])
+            steps = [
+                {
+                    "id": "review_official_terms",
+                    "operator": "browser_or_computer_use",
+                    "mode": "read_only",
+                    "instruction": "Open an official link, retrieve current terms, and compare payment, expiry, quota, and hard-stop behavior with this catalog entry.",
+                },
+                {
+                    "id": "verify_billing_boundary",
+                    "operator": "browser_or_computer_use",
+                    "mode": "read_only",
+                    "instruction": "Inspect billing before any submission. Stop on a card, payment method, deposit, hold, auto-upgrade, or paid fallback.",
+                },
+                {
+                    "id": "record_readback",
+                    "operator": "local_api",
+                    "mode": "evidence_only",
+                    "endpoint": "POST /v1/usage/observe",
+                    "instruction": "After a legitimate zero-liability readback, record only redacted balance or quota meter values; never send credentials.",
+                },
+            ]
+            if action_state == "safe_to_prepare":
+                steps.append(
+                    {
+                        "id": "connect_or_handoff",
+                        "operator": "agent_or_human",
+                        "mode": "session_only",
+                        "endpoint": "POST /v1/onboarding/connect",
+                        "instruction": "Connect a preconfigured local CLI, environment reference, or transient session only after the evidence gate passes; this does not arm compute.",
+                    }
+                )
+            else:
+                steps.append(
+                    {
+                        "id": "resolve_next_action",
+                        "operator": _acquisition_action_mode(status, zero_liability),
+                        "mode": "blocked_until_evidence",
+                        "instruction": item.get("next_action")
+                        if isinstance(item.get("next_action"), str)
+                        else "Resolve the listed evidence and liability gates before activation or signup.",
+                    }
+                )
+            hardware = item.get("hardware") if isinstance(item.get("hardware"), dict) else {}
+            usability = item.get("usability") if isinstance(item.get("usability"), dict) else {}
+            private_observation = _account_private_observation(item) if kind == "account" else None
+            private_bridge = (
+                _private_observation_bridge_applies(
+                    self.catalog, item, self.usage.get(item.get("id"))
+                )
+                if kind == "account"
+                else False
+            )
+            allowance = (
+                private_observation["balance"]
+                if private_observation is not None
+                else item.get("allowance", item.get("balance"))
+            )
+            allowance_unit = (
+                private_observation["balance_unit"]
+                if private_observation is not None
+                else item.get("balance_unit")
+            )
+            return {
+                "id": item.get("id"),
+                "kind": kind,
+                "provider": item.get("provider"),
+                "status": status,
+                "action_state": action_state,
+                "action_mode": _acquisition_action_mode(status, zero_liability),
+                "zero_liability_verified": zero_liability,
+                "liability_blockers": list(liability_reasons),
+                "freshness": {
+                    "catalog_as_of": self.catalog.get("as_of"),
+                    "global_catalog_reasons": catalog_reasons,
+                    "reasons": freshness_reasons,
+                    "private_observation_bridge": {
+                        "applied": private_bridge,
+                        "research_retrieved_as_of": self.catalog.get("research_retrieved_as_of"),
+                        "max_research_age_days": MAX_PRIVATE_OBSERVATION_RESEARCH_AGE_DAYS,
+                    }
+                    if kind == "account"
+                    else None,
+                },
+                "recurrence": item.get("recurrence"),
+                "allowance": allowance,
+                "allowance_unit": allowance_unit,
+                "meter": {
+                    "source": "private_observation",
+                    "observed_at": private_observation["observed_at"],
+                    "balance": private_observation["balance"],
+                    "balance_unit": private_observation["balance_unit"],
+                }
+                if private_observation is not None
+                else None,
+                "hardware": {
+                    "best_gpu": hardware.get("best_gpu"),
+                    "gpu_models": hardware.get("gpu_models", []),
+                    "memory_per_unit_gb_min": hardware.get("memory_per_unit_gb_min", hardware.get("vram_gb_min")),
+                    "memory_per_unit_gb_max": hardware.get("memory_per_unit_gb_max", hardware.get("vram_gb_max")),
+                    "unit_count_max": hardware.get("unit_count_max", hardware.get("gpu_count_max")),
+                    "compute_class": hardware.get("compute_class"),
+                    "stack": hardware.get("stack", []),
+                },
+                "usable_now": usability.get("usable_now"),
+                "interruptibility": item.get("interruptibility", usability.get("interruptibility")),
+                "eligibility": item.get("eligibility"),
+                "links": _public_links(item),
+                "docs": item.get("docs"),
+                "next_action": item.get("next_action"),
+                "required_evidence": target_evidence,
+                "steps": steps,
+            }
+
+        accounts = []
+        for account in self._accounts().values():
+            zero_liability, liability_reasons = account_is_zero_liability(account)
+            accounts.append(
+                target(
+                    account,
+                    kind="account",
+                    zero_liability=zero_liability,
+                    liability_reasons=liability_reasons,
+                    freshness_reasons=_selected_account_freshness_reasons(
+                        self.catalog, account, self.usage.get(account.get("id"))
+                    ),
+                )
+            )
+        offers = []
+        for offer in self.catalog.get("offers", []):
+            if not isinstance(offer, dict) or not isinstance(offer.get("id"), str):
+                continue
+            zero_liability, liability_reasons = offer_is_zero_liability(offer)
+            offers.append(
+                target(
+                    offer,
+                    kind="offer",
+                    zero_liability=zero_liability,
+                    liability_reasons=liability_reasons,
+                    freshness_reasons=[*catalog_reasons, *_source_freshness_reasons(offer)],
+                )
+            )
+        blockers = []
+        for blocker in self.catalog.get("blockers", []):
+            if not isinstance(blocker, dict) or not isinstance(blocker.get("id"), str):
+                continue
+            blockers.append(
+                {
+                    "id": blocker["id"],
+                    "provider": blocker.get("provider"),
+                    "status": blocker.get("status"),
+                    "summary": blocker.get("summary"),
+                    "needed": blocker.get("needed"),
+                    "next_action": blocker.get("next_action"),
+                    "operator": "human_or_browser_assisted",
+                }
+            )
+        return {
+            "schema_version": 1,
+            "as_of": _iso(),
+            "catalog_as_of": self.catalog.get("as_of"),
+            "catalog_freshness_reasons": catalog_reasons,
+            "api": {
+                "version": 1,
+                "scope": "local_loopback_only",
+                "authentication": "none; loopback Host and same-origin controls are enforced",
+                "content_type": "application/json for POST requests",
+                "endpoints": [
+                    {"method": "GET", "path": "/health", "purpose": "local service health"},
+                    {"method": "GET", "path": "/v1/acquisition", "purpose": "redacted acquisition plans and API metadata"},
+                    {"method": "GET", "path": "/v1/ledger", "purpose": "redacted catalog and aggregate ledger"},
+                    {"method": "GET", "path": "/v1/profiles", "purpose": "redacted configured profile capabilities"},
+                    {"method": "GET", "path": "/v1/storage", "purpose": "public storage catalog"},
+                    {"method": "GET", "path": "/v1/onboarding", "purpose": "credential-free connection readiness"},
+                    {"method": "POST", "path": "/v1/onboarding/connect", "purpose": "session-only local credential connection"},
+                    {"method": "POST", "path": "/v1/onboarding/clear", "purpose": "clear session credential metadata"},
+                    {"method": "DELETE", "path": "/v1/onboarding/clear", "purpose": "clear session credential metadata"},
+                    {"method": "GET", "path": "/v1/usage", "purpose": "redacted account meter state"},
+                    {"method": "POST", "path": "/v1/usage/refresh", "purpose": "refresh configured read-only meters"},
+                    {"method": "POST", "path": "/v1/usage/observe", "purpose": "record redacted read-only balance or quota evidence"},
+                    {"method": "GET", "path": "/v1/arm", "purpose": "current arm state"},
+                    {"method": "POST", "path": "/v1/arm", "purpose": "explicit arm request after all gates pass"},
+                    {"method": "POST", "path": "/v1/arm/auto", "purpose": "plan and explicitly arm compatible capacity"},
+                    {"method": "POST", "path": "/v1/plan", "purpose": "zero-spend planning only"},
+                    {"method": "POST", "path": "/v1/dispatch", "purpose": "dispatch through an armed compatible profile"},
+                    {"method": "POST", "path": "/v1/disarm", "purpose": "disarm compute immediately"},
+                ],
+            },
+            "hard_stop_conditions": _acquisition_hard_stops(),
+            "required_evidence": required_evidence,
+            "accounts": accounts,
+            "offers": offers,
+            "blockers": blockers,
         }
 
     def connect_credential(self, raw: Any) -> dict[str, Any]:
@@ -2429,11 +3044,19 @@ class OrchestratorState:
             thresholds = rules.get("balance_thresholds", {})
             for account_id in self.arm_state["providers"]:
                 snapshot = self.usage.get(account_id, {})
-                balance = snapshot.get("balance")
+                account = self._accounts().get(account_id, {})
+                balance, balance_unit, _observed_at, balance_source = _effective_account_balance(
+                    account, snapshot
+                )
                 available = snapshot.get("available_h100e")
                 threshold = thresholds.get(account_id)
+                if balance_source in {"private_observation", "live_monitor"} and isinstance(
+                    balance, (int, float)
+                ) and balance <= 0:
+                    reason = f"{account_id} has no {balance_source.replace('_', '-')} balance available"
+                    break
                 if isinstance(threshold, dict) and isinstance(balance, (int, float)):
-                    if snapshot.get("balance_unit") != threshold.get("unit"):
+                    if balance_unit != threshold.get("unit"):
                         reason = f"{account_id} monitored balance unit does not match its armed threshold"
                         break
                     if balance < threshold["value"]:
@@ -2441,6 +3064,10 @@ class OrchestratorState:
                         break
                 if isinstance(available, (int, float)) and available <= 0:
                     reason = f"{account_id} has no monitored H100e available"
+                    break
+                quota_reasons = _live_quota_reasons(snapshot)
+                if quota_reasons:
+                    reason = f"{account_id} {quota_reasons[0]}"
                     break
         if reason:
             if self.dispatch_in_progress:
@@ -2474,11 +3101,6 @@ class OrchestratorState:
     def arm(self, request: Any) -> dict[str, Any]:
         if not isinstance(request, dict):
             raise OrchestratorError("invalid_arm", "Arm request must be an object")
-        catalog_reasons = _catalog_freshness_reasons(self.catalog)
-        if catalog_reasons:
-            raise OrchestratorError(
-                "stale_catalog", f"Cannot arm: {'; '.join(catalog_reasons)}", status=409
-            )
         providers = request.get("providers")
         if not isinstance(providers, list) or not providers or len(providers) > 32 or not all(
             isinstance(item, str) and ID_RE.fullmatch(item) for item in providers
@@ -2491,9 +3113,9 @@ class OrchestratorState:
             account = accounts.get(account_id)
             if account is None:
                 raise OrchestratorError("invalid_arm", f"Unknown account: {account_id}")
-            safe, reasons = account_is_zero_liability(account)
+            safe, reasons = account_is_zero_liability(account, self.usage.get(account_id))
             usability = account.get("usability")
-            freshness_reasons = _account_freshness_reasons(account)
+            freshness_reasons = _account_freshness_reasons(account, self.usage.get(account_id))
             if (
                 not safe
                 or freshness_reasons
@@ -2578,7 +3200,10 @@ class OrchestratorState:
                 "invalid_arm", "balance thresholds must target an armed account"
             )
         for account_id, threshold in thresholds.items():
-            if accounts[account_id].get("balance_unit") != threshold["unit"]:
+            _balance, balance_unit, _observed_at, _source = _effective_account_balance(
+                accounts[account_id], self.usage.get(account_id)
+            )
+            if balance_unit != threshold["unit"]:
                 raise OrchestratorError(
                     "invalid_arm", f"balance threshold unit does not match {account_id} catalog balance"
                 )
@@ -2588,15 +3213,22 @@ class OrchestratorState:
                     "invalid_arm", "legacy balance_floor requires one armed account and no balance_thresholds"
                 )
             account_id = providers[0]
-            if accounts[account_id].get("balance_unit") != "USD":
+            _balance, balance_unit, _observed_at, _source = _effective_account_balance(
+                accounts[account_id], self.usage.get(account_id)
+            )
+            if balance_unit != "USD":
                 raise OrchestratorError(
                     "invalid_arm", "legacy balance_floor is only compatible with an explicit USD account balance"
                 )
             thresholds[account_id] = {"value": shutdown["balance_floor"], "unit": "USD"}
         with self.dispatch_gate, self.lock:
-            fresh_reasons = _catalog_freshness_reasons(self.catalog)
+            fresh_reasons = []
             for account_id in providers:
-                fresh_reasons.extend(_account_freshness_reasons(accounts[account_id]))
+                fresh_reasons.extend(
+                    _selected_account_freshness_reasons(
+                        self.catalog, accounts[account_id], self.usage.get(account_id)
+                    )
+                )
             if fresh_reasons:
                 raise OrchestratorError(
                     "stale_catalog",
@@ -2699,7 +3331,7 @@ class OrchestratorState:
                 if (
                     fresh.get("active_cost_per_hour") is not None
                     and fresh.get("active_cost_unit") is None
-                    and account.get("balance_unit") == "USD"
+                    and _effective_account_balance(account)[1] == "USD"
                 ):
                     fresh["active_cost_unit"] = "USD"
                 account_traits = _traits_for_account(account, self.catalog)
@@ -2823,7 +3455,7 @@ class OrchestratorState:
         if (
             observation.get("active_cost_per_hour") is not None
             and observation.get("active_cost_unit") is None
-            and account.get("balance_unit") == "USD"
+            and _effective_account_balance(account)[1] == "USD"
         ):
             observation["active_cost_unit"] = "USD"
         supports_cuda = any(
@@ -2934,6 +3566,18 @@ class OrchestratorState:
                     "deltas": {},
                     "error": None,
                 }
+            balance, balance_unit, observed_at, balance_source = _effective_account_balance(
+                account, snapshot
+            )
+            if balance_source in {"private_observation", "live_monitor"}:
+                row.update(
+                    {
+                        "balance": balance,
+                        "balance_unit": balance_unit,
+                        "observed_at": observed_at,
+                        "balance_source": balance_source,
+                    }
+                )
             rows.append(row)
         profiles = self._monitor_profiles()
         gaps = []
@@ -3152,9 +3796,6 @@ class OrchestratorState:
                 return blocked("Compute is disarmed; use Arm Compute before dispatch")
             arm = json.loads(canonical_json(self.arm_state))
             arm_generation = self.arm_generation
-        freshness_reasons = _catalog_freshness_reasons(self.catalog)
-        if freshness_reasons:
-            return blocked("; ".join(freshness_reasons))
         allowed_accounts = set(arm["providers"])
         allowed_storage = set(arm["storage_ids"])
         profiles = self._effective_profiles()
@@ -3169,7 +3810,16 @@ class OrchestratorState:
             return remember(plan)
         selected_account_id = str(plan["selected"]["account_id"])
         account = self._accounts().get(selected_account_id, {})
-        account_freshness = _account_freshness_reasons(account)
+        account_safe, account_reasons = account_is_zero_liability(
+            account, self.usage.get(selected_account_id)
+        )
+        if not account_safe:
+            plan["status"] = "blocked"
+            plan["reasons"] = list(account_reasons)
+            return remember(plan)
+        account_freshness = _selected_account_freshness_reasons(
+            self.catalog, account, self.usage.get(selected_account_id)
+        )
         if account_freshness:
             plan["status"] = "blocked"
             plan["reasons"] = account_freshness
@@ -3282,8 +3932,9 @@ class OrchestratorState:
                 ):
                     return blocked("Armed storage changed before dispatch; review and submit again")
                 final_freshness = [
-                    *_catalog_freshness_reasons(self.catalog),
-                    *_account_freshness_reasons(account),
+                    *_selected_account_freshness_reasons(
+                        self.catalog, account, self.usage.get(selected_account_id)
+                    ),
                     *self._dispatch_monitor_reasons(profile, selected_account_id),
                 ]
                 if final_freshness:
@@ -3323,7 +3974,13 @@ class OrchestratorState:
                     result = {**plan, "status": "completed", **adapter_result}
                 elif adapter in {"command", "codex_exec"}:
                     adapter_result = _dispatch_command(job, profile)
-                    command_status = "completed" if adapter_result["exit_code"] == 0 else "failed"
+                    command_status = (
+                        "ambiguous"
+                        if adapter_result.get("provider_outcome") == "ambiguous"
+                        else "completed"
+                        if adapter_result["exit_code"] == 0
+                        else "failed"
+                    )
                     result = {**plan, "status": command_status, **adapter_result}
                 else:
                     raise OrchestratorError(
@@ -3453,13 +4110,13 @@ def ledger_summary(catalog: dict[str, Any]) -> dict[str, Any]:
                 "id": item.get("id"),
                 "provider": item.get("provider"),
                 "status": item.get("status"),
-                "balance": item.get("balance"),
-                "balance_unit": item.get("balance_unit"),
+                "balance": _effective_account_balance(item)[0],
+                "balance_unit": _effective_account_balance(item)[1],
                 "recurrence": item.get("recurrence", "unknown"),
                 "usable_zero_liability": account_is_zero_liability(item)[0],
             }
             for item in accounts
-            if item.get("balance") is not None
+            if _effective_account_balance(item)[0] is not None
         ],
     }
 
@@ -3626,9 +4283,15 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
                 self._validate_request_context()
                 route = urlsplit(self.path).path
                 if route == "/health":
-                    self._send(200, {"status": "ok", "service": "free-compute-app", "version": 2})
+                    self._send(200, {"status": "ok", "service": "free-compute-app", "version": 3})
                 elif route == "/v1/ledger":
-                    self._send(200, {"summary": ledger_summary(state.catalog), "catalog": state.catalog})
+                    self._send(
+                        200,
+                        {
+                            "summary": ledger_summary(state.catalog),
+                            "catalog": public_catalog_view(state.catalog),
+                        },
+                    )
                 elif route == "/v1/storage":
                     self._send(200, {"storage": state.catalog.get("storage", [])})
                 elif route == "/v1/profiles":
@@ -3638,6 +4301,8 @@ def make_handler(state: OrchestratorState) -> type[BaseHTTPRequestHandler]:
                     )
                 elif route == "/v1/onboarding":
                     self._send(200, state.onboarding_view())
+                elif route == "/v1/acquisition":
+                    self._send(200, state.acquisition_view())
                 elif route == "/v1/usage":
                     self._send(200, state.usage_view())
                 elif route == "/v1/arm":
@@ -3769,6 +4434,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         catalog = read_json(args.catalog)
+        validate_private_catalog_overlay(args.catalog, catalog)
         profiles = load_profiles(args.profiles)
         if args.command == "serve":
             errors, _warnings = validate_catalog(catalog, _local_today())

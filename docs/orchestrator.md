@@ -80,6 +80,7 @@ Requests and responses are JSON. The UI uses these same routes; there is no sepa
 | --- | --- | --- |
 | `GET` | `/health` | Service and version status. |
 | `GET` | `/v1/ledger` | Intentionally public, redacted catalog plus safe summary and non-additive compute-family slices; no login identity, SSO topology, keys, or auth configuration. |
+| `GET` | `/v1/acquisition` | Redacted, machine-readable account and offer setup plans, evidence requirements, hard-stop conditions, and per-target freshness blockers for browser, computer-use, CLI, or human operators. |
 | `GET` | `/v1/storage` | Redacted native-unit storage inventory; capacities are non-additive. |
 | `GET` | `/v1/profiles` | Minimal adapter-readiness summaries: profile/account IDs and enabled, dispatch, planner, and monitor flags only. No auth mode, secret values, environment names, endpoints, headers, paths, or commands. |
 | `GET` | `/v1/onboarding` | First-use checklist and per-profile/account readiness. The catalog remains useful with no credential or profile. |

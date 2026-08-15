@@ -2393,10 +2393,10 @@ async function loadCatalog() {
       loadedSource = "/v1/ledger";
       if (!catalog || typeof catalog !== "object") throw new Error("ledger did not include a catalog");
     } else {
-      const response = await fetch("data/catalog.example.json", { cache: "no-store" });
-      if (!response.ok) throw new Error(`data/catalog.example.json: HTTP ${response.status}`);
+      const response = await fetch("data/catalog.json", { cache: "no-store" });
+      if (!response.ok) throw new Error(`data/catalog.json: HTTP ${response.status}`);
       catalog = await response.json();
-      loadedSource = "data/catalog.example.json";
+      loadedSource = "data/catalog.json";
     }
     catalog.blockers = Array.isArray(catalog.blockers) ? catalog.blockers : [];
     catalog.normalization = catalog.normalization && typeof catalog.normalization === "object" ? catalog.normalization : {};

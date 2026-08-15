@@ -31,6 +31,8 @@ For start-at-logon hosting, install the user-scoped scheduled task once:
 
 The supervisor accepts only the exact loopback health identity `free-compute-app` version 2. It reuses one healthy instance, replaces only an older process whose command line is verified as this checkout's orchestrator, and refuses to stop an unknown process occupying the port.
 
+For a Linux worker or an SSH-forwarded browser/API client, use the [Linux guide](docs/linux.md). Linux requires Python 3.10 or newer; the control API and client remain loopback-only, including through an SSH tunnel. The guide explains the user-scoped `systemd` service, local profile overlay, and safe tunnel topology. The [acquisition runbook](docs/acquisition.md) is the handoff for a browser-capable agent or a human completing legitimate provider setup; it does not authorize payment, eligibility misrepresentation, CAPTCHA bypass, or use of an unsafe balance.
+
 Usage monitoring has two paths. Configured provider monitors refresh automatically while the app runs. A browser, CLI, or human can also submit a redacted observation to `POST /v1/usage/observe` with an account ID and meter fields such as balance, active jobs, hourly cost, or expiry. Manual observations are append-only evidence and never become the authoritative `live` monitor snapshot required for dispatch. The app does not store API keys or authentication topology in public usage output.
 
 ## First-use account meters
@@ -58,7 +60,7 @@ The deterministic auto-arm route accepts an already structured portable job, sel
 ## CLI and validation
 
 ```powershell
-py scripts/validate_catalog.py --as-of 2026-08-11
+py scripts/validate_catalog.py
 py -m unittest discover -s tests -v
 py scripts/orchestrator.py plan --job .\specs\example-job.json
 py scripts/orchestrator.py ledger
@@ -66,9 +68,11 @@ py scripts/orchestrator.py ledger
 
 Run these gates locally. GitHub-hosted Actions credits are nearly exhausted, so pushes and pull requests do not start hosted CI. The repository workflow is manual-only and requires typing an explicit hosted-credit warning before it can run. A self-hosted runner may use the same commands without consuming hosted Actions capacity.
 
-Use the catalog refresh date for `--as-of`. A green UI or test suite does not prove that a volatile offer remains card-free, that a quota remains available, or that a provider will stop before a charge. Re-read the live meter and hard-stop state immediately before arming.
+Use the catalog refresh date for `--as-of` when checking a historical snapshot; omit it for the current snapshot. A green UI or test suite does not prove that a volatile offer remains card-free, that a quota remains available, or that a provider will stop before a charge. Re-read the live meter and hard-stop state immediately before arming.
 
-See the [orchestrator guide](docs/orchestrator.md) for the loopback API and portable job format, [provider usage](docs/provider-usage.md) for current operating boundaries, the [compatibility guide](docs/compatibility.md) for compute and storage routing, and the [roadmap](docs/roadmap.md) for explicitly post-V1 work.
+For a selected account only, a complete same-day private observation may bridge a stale public `catalog.as_of` when the catalog's official research retrieval is valid, not future-dated, and no more than seven days old. It never bridges a missing/future/older research record, a public-only account, a missing same-day observation, or any payment, hard-stop, profile, meter, or Arm gate. The acquisition API reports whether the bridge applies.
+
+See the [orchestrator guide](docs/orchestrator.md) for the loopback API and portable job format, the [Linux guide](docs/linux.md) for a deployable local endpoint, the [acquisition runbook](docs/acquisition.md) for account/setup handoffs, [provider profiles](docs/provider-profiles.md) for local adapters and meters, [provider usage](docs/provider-usage.md) for current operating boundaries, the [compatibility guide](docs/compatibility.md) for compute and storage routing, and the [roadmap](docs/roadmap.md) for explicitly post-V1 work.
 
 ## Safety and privacy
 

@@ -21,7 +21,7 @@ while ($true) {
             $response.StatusCode -eq 200 -and
             $health.service -eq 'free-compute-app' -and
             $health.status -eq 'ok' -and
-            $health.version -eq 2
+            $health.version -eq 3
         ) {
             Start-Sleep -Seconds 5
             continue

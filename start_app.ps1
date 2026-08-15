@@ -10,17 +10,50 @@ if ($Port -lt 1 -or $Port -gt 65535) {
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $url = "http://127.0.0.1:$Port/"
 $validator = Join-Path $projectRoot 'scripts\validate_catalog.py'
-$catalog = Join-Path $projectRoot 'data\catalog.json'
+$publicCatalog = Join-Path $projectRoot 'data\catalog.json'
+$privateCatalog = Join-Path $projectRoot 'data\catalog.private.json'
+$catalog = $publicCatalog
+$localCatalog = Join-Path $projectRoot 'scripts\local_catalog.py'
 $orchestrator = Join-Path $projectRoot 'scripts\orchestrator.py'
 $runtimeState = Join-Path $projectRoot 'orchestrator\state\usage.json'
+
+function ConvertTo-ProcessTokens {
+    param([string]$CommandLine)
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return @() }
+    return @(
+        [regex]::Matches($CommandLine, '"([^"\\]*(?:\\.[^"\\]*)*)"|(\S+)') |
+        ForEach-Object {
+            if ($_.Groups[1].Success) { $_.Groups[1].Value -replace '\\"', '"' }
+            else { $_.Groups[2].Value }
+        }
+    )
+}
 
 function Get-VerifiedListenerProcess {
     $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
     if ($listeners.Count -ne 1) { return $null }
     $process = Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f $listeners[0].OwningProcess) -ErrorAction SilentlyContinue
     if ($null -eq $process) { return $null }
-    $commandLine = [string]$process.CommandLine
-    if ($commandLine.IndexOf($orchestrator, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    $tokens = ConvertTo-ProcessTokens ([string]$process.CommandLine)
+    $scriptIndex = -1
+    for ($index = 0; $index -lt $tokens.Count; $index++) {
+        if ([string]::Equals($tokens[$index], $orchestrator, [StringComparison]::OrdinalIgnoreCase)) {
+            $scriptIndex = $index
+            break
+        }
+    }
+    if ($scriptIndex -lt 0) {
+        return $null
+    }
+    $serveIndex = $scriptIndex + 1
+    while ($serveIndex -lt $tokens.Count -and $tokens[$serveIndex] -ne 'serve') { $serveIndex++ }
+    if (
+        $serveIndex + 4 -ge $tokens.Count -or
+        $tokens[$serveIndex + 1] -ne '--host' -or
+        $tokens[$serveIndex + 2] -ne '127.0.0.1' -or
+        $tokens[$serveIndex + 3] -ne '--port' -or
+        $tokens[$serveIndex + 4] -ne [string]$Port
+    ) {
         return $null
     }
     return $process
@@ -49,7 +82,7 @@ if ($null -ne $existing) {
         $existing.StatusCode -eq 200 -and
         $health.service -eq 'free-compute-app' -and
         $health.status -eq 'ok' -and
-        $health.version -eq 2
+        $health.version -eq 3
     ) {
         if (-not $NoBrowser) { Start-Process $url }
         Write-Output "Free Compute app is already available at $url"
@@ -76,10 +109,24 @@ if (-not $python) {
     throw 'Python is required to validate and run the Free Compute app.'
 }
 
-$today = Get-Date -Format 'yyyy-MM-dd'
-& $python.Source $validator $catalog '--as-of' $today
+$publicMetadata = Get-Content -Raw $publicCatalog | ConvertFrom-Json
+$publicAsOf = [string]$publicMetadata.as_of
+if ([string]::IsNullOrWhiteSpace($publicAsOf)) {
+    throw 'Public catalog has no as_of date.'
+}
+& $python.Source $validator $publicCatalog '--as-of' $publicAsOf
 if ($LASTEXITCODE -ne 0) {
-    throw "Catalog validation failed with exit code $LASTEXITCODE."
+    throw "Public catalog validation failed with exit code $LASTEXITCODE."
+}
+
+if (Test-Path -LiteralPath $privateCatalog) {
+    & $python.Source $localCatalog '--public-catalog' $publicCatalog '--private-catalog' $privateCatalog 'check' 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $catalog = $privateCatalog
+    }
+    else {
+        Write-Warning 'Local private catalog did not pass provenance validation; using the public catalog.'
+    }
 }
 
 $arguments = @(
@@ -97,7 +144,13 @@ try {
         }
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri ($url + 'health') -TimeoutSec 1
-            if ($response.StatusCode -eq 200) {
+            $health = $response.Content | ConvertFrom-Json
+            if (
+                $response.StatusCode -eq 200 -and
+                $health.service -eq 'free-compute-app' -and
+                $health.status -eq 'ok' -and
+                $health.version -eq 3
+            ) {
                 $ready = $true
                 break
             }

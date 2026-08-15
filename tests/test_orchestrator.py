@@ -24,6 +24,7 @@ from orchestrator import (
     canonical_json,
     ledger_summary,
     load_profiles,
+    main,
     make_handler,
     plan_job,
     public_profile_summary,
@@ -1589,6 +1590,283 @@ class OrchestratorTests(unittest.TestCase):
         self.assertTrue(safe["missing_profile_definition"])
         self.assertIn("endpoint or CLI monitor profile", safe["next_action"])
 
+    def test_acquisition_view_is_redacted_evidence_first_and_marks_stale_targets(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0]["links"] = [
+            {"label": "Public", "url": "https://provider.example/console"},
+            {"label": "Private", "url": "https://user:private@example.invalid/"},
+        ]
+        catalog["offers"][0]["sources"] = [
+            {"url": "https://provider.example/terms", "verified_on": "2020-01-01"}
+        ]
+        view = OrchestratorState(catalog, {}).acquisition_view()
+        self.assertEqual(1, view["schema_version"])
+        self.assertEqual("local_loopback_only", view["api"]["scope"])
+        self.assertTrue(any(item["path"] == "/v1/plan" for item in view["api"]["endpoints"]))
+        safe = next(item for item in view["accounts"] if item["id"] == "safe-account")
+        self.assertEqual("safe_to_prepare", safe["action_state"])
+        self.assertEqual("https://provider.example/console", safe["links"][0]["url"])
+        self.assertEqual("POST /v1/usage/observe", safe["steps"][2]["endpoint"])
+        self.assertIn("post_action_zero_liability_readback", safe["required_evidence"])
+        paid = next(item for item in view["accounts"] if item["id"] == "paid-account")
+        self.assertEqual("blocked_payment", paid["action_state"])
+        offer = view["offers"][0]
+        self.assertEqual("refresh_or_evidence_required", offer["action_state"])
+        self.assertTrue(any("stale" in reason for reason in offer["freshness"]["reasons"]))
+        serialized = canonical_json(view)
+        self.assertNotIn("private@example", serialized)
+        self.assertNotIn("user:private", serialized)
+
+    def test_acquisition_uses_only_a_complete_account_private_observation(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0].update({"balance_as_of": "2020-01-01", "balance": 1})
+        catalog["accounts"][0]["private_observation"] = {
+            "observed_at": datetime.now().astimezone().date().isoformat(),
+            "balance": 92.02,
+            "balance_unit": "USD credit",
+            "payment_state": "no_payment_method",
+            "hard_stop": True,
+            "paid_fallback_allowed": False,
+            "evidence": "private billing detail must stay local",
+            "official_urls": ["https://provider.example/billing"],
+        }
+        safe = OrchestratorState(catalog, {}).acquisition_view()["accounts"][0]
+        self.assertEqual(92.02, safe["allowance"])
+        self.assertEqual("USD credit", safe["allowance_unit"])
+        self.assertEqual("private_observation", safe["meter"]["source"])
+        self.assertEqual([], safe["freshness"]["reasons"])
+        serialized = canonical_json(safe)
+        self.assertNotIn("private billing detail", serialized)
+        self.assertNotIn("provider.example/billing", serialized)
+
+    def test_private_account_observation_bridges_only_recent_research_for_arming(self):
+        today = datetime.now().astimezone().date()
+        catalog = fixture_catalog()
+        catalog["as_of"] = (today - timedelta(days=3)).isoformat()
+        catalog["research_retrieved_as_of"] = (today - timedelta(days=3)).isoformat()
+        catalog["accounts"][0]["private_observation"] = {
+            "observed_at": today.isoformat(),
+            "balance": 92.02,
+            "balance_unit": "USD credit",
+            "payment_state": "no_payment_method",
+            "hard_stop": True,
+            "paid_fallback_allowed": False,
+        }
+        state = OrchestratorState(catalog, {})
+        view = state.acquisition_view()
+        safe = next(item for item in view["accounts"] if item["id"] == "safe-account")
+        self.assertTrue(view["catalog_freshness_reasons"])
+        self.assertEqual([], safe["freshness"]["reasons"])
+        self.assertTrue(safe["freshness"]["private_observation_bridge"]["applied"])
+        self.assertTrue(state.arm({"providers": ["safe-account"]})["armed"])
+
+        public_only = fixture_catalog()
+        public_only["as_of"] = catalog["as_of"]
+        public_only["research_retrieved_as_of"] = catalog["research_retrieved_as_of"]
+        with self.assertRaises(OrchestratorError) as caught:
+            OrchestratorState(public_only, {}).arm({"providers": ["safe-account"]})
+        self.assertEqual("stale_catalog", caught.exception.code)
+
+        research_too_old = copy.deepcopy(catalog)
+        research_too_old["research_retrieved_as_of"] = (today - timedelta(days=8)).isoformat()
+        with self.assertRaises(OrchestratorError) as caught:
+            OrchestratorState(research_too_old, {}).arm({"providers": ["safe-account"]})
+        self.assertEqual("stale_catalog", caught.exception.code)
+
+        research_in_future = copy.deepcopy(catalog)
+        research_in_future["research_retrieved_as_of"] = (today + timedelta(days=1)).isoformat()
+        with self.assertRaises(OrchestratorError) as caught:
+            OrchestratorState(research_in_future, {}).arm({"providers": ["safe-account"]})
+        self.assertEqual("stale_catalog", caught.exception.code)
+
+        observation_in_future = copy.deepcopy(catalog)
+        observation_in_future["accounts"][0]["private_observation"]["observed_at"] = (
+            today + timedelta(days=1)
+        ).isoformat()
+        with self.assertRaises(OrchestratorError) as caught:
+            OrchestratorState(observation_in_future, {}).arm({"providers": ["safe-account"]})
+        self.assertEqual("unsafe_arm", caught.exception.code)
+
+    def test_private_zero_balance_overrides_catalog_for_readiness_usage_and_arming(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0].update({"balance": 10, "balance_unit": "credits"})
+        catalog["accounts"][0]["private_observation"] = {
+            "observed_at": datetime.now().astimezone().date().isoformat(),
+            "balance": 0,
+            "balance_unit": "credits",
+            "payment_state": "no_payment_method",
+            "hard_stop": True,
+            "paid_fallback_allowed": False,
+        }
+        state = OrchestratorState(catalog, {})
+        acquisition = next(item for item in state.acquisition_view()["accounts"] if item["id"] == "safe-account")
+        self.assertEqual(0, acquisition["allowance"])
+        usage = next(item for item in state.usage_view()["accounts"] if item["account_id"] == "safe-account")
+        self.assertEqual(0, usage["balance"])
+        self.assertEqual("private_observation", usage["balance_source"])
+        onboarding = next(item for item in state.onboarding_view()["readiness"] if item["account_id"] == "safe-account")
+        self.assertFalse(onboarding["balance_verified"])
+        self.assertFalse(onboarding["policy_eligible"])
+        planned = plan_job(fixture_job(), catalog, {})
+        self.assertEqual("blocked", planned["status"])
+        self.assertTrue(any("no available balance" in reason for reason in planned["reasons"]))
+        with self.assertRaises(OrchestratorError) as caught:
+            state.arm({"providers": ["safe-account"]})
+        self.assertEqual("unsafe_arm", caught.exception.code)
+
+    def test_windows_launchers_require_health_v3_and_validate_private_catalog(self):
+        launcher = (ROOT / "start_app.ps1").read_text(encoding="utf-8-sig")
+        supervisor = (ROOT / "run_app_supervisor.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("$health.version -eq 3", launcher)
+        self.assertIn("$health.version -eq 3", supervisor)
+        self.assertIn("data\\catalog.private.json", launcher)
+        self.assertIn("--private-catalog", launcher)
+        self.assertIn("'check'", launcher)
+        self.assertNotIn("$privateValidation = @'", launcher)
+        self.assertIn("--host", launcher)
+        self.assertIn("--port", launcher)
+
+    def test_private_overlay_startup_rejects_forged_and_stale_catalogs(self):
+        public_path = ROOT / "data" / "catalog.json"
+        public_bytes = public_path.read_bytes()
+        public = json.loads(public_bytes.decode("utf-8-sig"))
+        canonical_public = (
+            json.dumps(public, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        today = datetime.now().astimezone().date()
+
+        def private_copy(*, forged: bool = False, stale: bool = False):
+            catalog = copy.deepcopy(public)
+            catalog["private_overlay"] = {
+                "format": "local-catalog-overlay-v1",
+                "base_catalog_path": "data/catalog.json",
+                "base_catalog_sha256": "0" * 64 if forged else hashlib.sha256(public_bytes).hexdigest(),
+                "base_catalog_canonical_sha256": hashlib.sha256(canonical_public).hexdigest(),
+                "base_catalog_as_of": public["as_of"],
+                "created_on": today.isoformat(),
+                "observations": [],
+            }
+            if stale:
+                observed_at = (today - timedelta(days=1)).isoformat()
+                observation = {
+                    "account_id": catalog["accounts"][0]["id"],
+                    "observed_at": observed_at,
+                    "balance": 1,
+                    "balance_unit": "credit",
+                    "payment_state": "no_payment_method",
+                    "hard_stop": True,
+                    "paid_fallback_allowed": False,
+                    "evidence": "Redacted stale observation",
+                    "official_urls": ["https://example.com/"],
+                }
+                catalog["accounts"][0]["private_observation"] = {
+                    key: value for key, value in observation.items() if key != "account_id"
+                }
+                catalog["private_overlay"]["observations"] = [{
+                    "event": "private_account_safety_observation",
+                    "account_id": observation["account_id"],
+                    "observed_at": observed_at,
+                    "observation": observation,
+                }]
+            return catalog
+
+        missing_overlay = copy.deepcopy(public)
+        missing_overlay["accounts"][0]["private_observation"] = {}
+        scalar_overlay = copy.deepcopy(public)
+        scalar_overlay["private_overlay"] = "not-an-overlay"
+        with TemporaryDirectory() as directory:
+            for name, catalog in (
+                ("forged", private_copy(forged=True)),
+                ("stale", private_copy(stale=True)),
+                ("missing-overlay", missing_overlay),
+                ("scalar-overlay", scalar_overlay),
+            ):
+                path = Path(directory) / f"{name}.json"
+                path.write_text(json.dumps(catalog), encoding="utf-8")
+                self.assertEqual(2, main(["--catalog", str(path), "ledger"]))
+
+    def test_command_timeout_follows_validated_job_runtime_and_ambiguous_output(self):
+        profile = command_profile()
+        state = OrchestratorState(fixture_catalog(), {"command": profile})
+        state.arm({"providers": ["safe-account"]})
+        job = dispatch_job("long-command")
+        job["resources"]["max_runtime_minutes"] = 240
+        completed = SimpleNamespace(returncode=0, stdout='{"status":"ambiguous"}', stderr="")
+        with mock.patch("orchestrator.subprocess.run", return_value=completed) as run:
+            result = state.dispatch(job)
+        self.assertEqual("ambiguous", result["status"])
+        self.assertEqual(240 * 60 + 120, run.call_args.kwargs["timeout"])
+
+        long_state = OrchestratorState(fixture_catalog(), {"command": command_profile()})
+        long_state.arm({"providers": ["safe-account"]})
+        long_job = dispatch_job("max-command")
+        long_job["resources"]["max_runtime_minutes"] = 1440
+        with mock.patch(
+            "orchestrator.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout="{}", stderr=""),
+        ) as run:
+            self.assertEqual("completed", long_state.dispatch(long_job)["status"])
+        self.assertEqual(24 * 60 * 60 + 120, run.call_args.kwargs["timeout"])
+
+    def test_live_meter_wins_on_equal_or_newer_date_and_blocks_exhaustion_before_dispatch(self):
+        today = datetime.now().astimezone().date()
+        catalog = fixture_catalog()
+        catalog["accounts"][0]["private_observation"] = {
+            "observed_at": today.isoformat(),
+            "balance": 5,
+            "balance_unit": "credits",
+            "payment_state": "no_payment_method",
+            "hard_stop": True,
+            "paid_fallback_allowed": False,
+        }
+        state = OrchestratorState(catalog, {"command": command_profile()})
+        state.arm({"providers": ["safe-account"]})
+        state.usage["safe-account"] = {
+            "account_id": "safe-account",
+            "status": "live",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "balance": 0,
+            "balance_unit": "credits",
+            "meters": [],
+            "available_h100e": 1,
+        }
+        usage = next(item for item in state.usage_view()["accounts"] if item["account_id"] == "safe-account")
+        self.assertEqual(0, usage["balance"])
+        self.assertEqual("live_monitor", usage["balance_source"])
+        onboarding = next(item for item in state.onboarding_view()["readiness"] if item["account_id"] == "safe-account")
+        self.assertFalse(onboarding["balance_verified"])
+        self.assertFalse(onboarding["policy_eligible"])
+        with mock.patch("orchestrator.subprocess.run") as run:
+            result = state.dispatch(dispatch_job("live-zero"))
+        self.assertEqual("blocked", result["status"])
+        run.assert_not_called()
+
+        quota_state = OrchestratorState(catalog, {"command": command_profile()})
+        quota_state.arm({"providers": ["safe-account"]})
+        quota_state.usage["safe-account"] = {
+            "account_id": "safe-account",
+            "status": "live",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "balance": 5,
+            "balance_unit": "credits",
+            "meters": [{"id": "quota", "available": 0}],
+        }
+        with mock.patch("orchestrator.subprocess.run") as run:
+            self.assertEqual("blocked", quota_state.dispatch(dispatch_job("live-quota-zero"))["status"])
+        run.assert_not_called()
+
+        older_live = OrchestratorState(catalog, {})
+        older_live.usage["safe-account"] = {
+            "account_id": "safe-account",
+            "status": "live",
+            "observed_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            "balance": 1,
+            "balance_unit": "credits",
+        }
+        fallback = next(item for item in older_live.usage_view()["accounts"] if item["account_id"] == "safe-account")
+        self.assertEqual(5, fallback["balance"])
+        self.assertEqual("private_observation", fallback["balance_source"])
+
     def test_profileless_catalog_connection_is_metadata_only_and_never_routes(self):
         state = OrchestratorState(fixture_catalog(), {})
         reference = state.connect_credential(
@@ -1810,7 +2088,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertEqual("ok", body["status"])
         self.assertEqual("free-compute-app", body["service"])
-        self.assertEqual(2, body["version"])
+        self.assertEqual(3, body["version"])
 
     def test_loopback_host_and_origin_controls_reject_cross_site_requests(self):
         status, body = self.request("GET", "/health", headers={"Host": "evil.example"})
@@ -1882,6 +2160,87 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(200, status)
         self.assertEqual(1, cleared["cleared"])
+
+    def test_acquisition_api_is_loopback_scoped_and_redacted(self):
+        status, body = self.request("GET", "/v1/acquisition")
+        self.assertEqual(200, status)
+        self.assertEqual(1, body["schema_version"])
+        self.assertEqual("local_loopback_only", body["api"]["scope"])
+        self.assertTrue(any(item["condition"] == "payment_method_or_hold" for item in body["hard_stop_conditions"]))
+        self.assertTrue(any(item["id"] == "safe-account" for item in body["accounts"]))
+        endpoints = {(item["method"], item["path"]) for item in body["api"]["endpoints"]}
+        self.assertTrue(
+            {
+                ("GET", "/health"),
+                ("GET", "/v1/ledger"),
+                ("GET", "/v1/acquisition"),
+                ("GET", "/v1/profiles"),
+                ("GET", "/v1/storage"),
+                ("GET", "/v1/onboarding"),
+                ("POST", "/v1/onboarding/connect"),
+                ("POST", "/v1/onboarding/clear"),
+                ("DELETE", "/v1/onboarding/clear"),
+                ("GET", "/v1/usage"),
+                ("POST", "/v1/usage/refresh"),
+                ("POST", "/v1/usage/observe"),
+                ("GET", "/v1/arm"),
+                ("POST", "/v1/arm"),
+                ("POST", "/v1/arm/auto"),
+                ("POST", "/v1/plan"),
+                ("POST", "/v1/dispatch"),
+                ("POST", "/v1/disarm"),
+            }.issubset(endpoints)
+        )
+        serialized = canonical_json(body)
+        for forbidden in ("PRIVATE_API_KEY", "private.example", "provider.exe", "key_env"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_ledger_api_projects_private_overlay_without_breaking_internal_meter_use(self):
+        catalog = fixture_catalog()
+        catalog["private_overlay"] = {
+            "evidence": "TOP_LEVEL_PRIVATE_SENTINEL",
+            "observations": [{"official_urls": ["https://private.example/overlay"]}],
+        }
+        catalog["accounts"][0]["private_observation"] = {
+            "observed_at": datetime.now().astimezone().date().isoformat(),
+            "balance": 92.02,
+            "balance_unit": "USD credit",
+            "payment_state": "no_payment_method",
+            "hard_stop": True,
+            "paid_fallback_allowed": False,
+            "evidence": "ACCOUNT_PRIVATE_SENTINEL",
+            "official_urls": ["https://private.example/account"],
+        }
+        state = OrchestratorState(catalog, {})
+        self.assertEqual(92.02, state.acquisition_view()["accounts"][0]["meter"]["balance"])
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(state))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("GET", "/v1/ledger")
+            response = connection.getresponse()
+            body = json.loads(response.read().decode("utf-8"))
+            connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+        self.assertEqual(200, response.status)
+        self.assertNotIn("private_overlay", body["catalog"])
+        observation = body["catalog"]["accounts"][0]["private_observation"]
+        self.assertEqual(92.02, observation["balance"])
+        self.assertNotIn("evidence", observation)
+        self.assertNotIn("official_urls", observation)
+        serialized = canonical_json(body)
+        for forbidden in (
+            "TOP_LEVEL_PRIVATE_SENTINEL",
+            "ACCOUNT_PRIVATE_SENTINEL",
+            "private.example/overlay",
+            "private.example/account",
+        ):
+            self.assertNotIn(forbidden, serialized)
 
     def test_usage_observation_api_is_sanitized_and_reports_monitor_gaps(self):
         status, body = self.request(

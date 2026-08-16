@@ -127,7 +127,7 @@ class ModalJobAdapterTests(unittest.TestCase):
             {
                 self.module.WORKSPACE_ENV: str(self.workspace),
                 self.module.COLLECT_DIR_ENV: str(self.collect),
-                self.module.CLI_ENV: "/bin/true",
+                self.module.CLI_ENV: sys.executable,
                 self.module.GPU_ENV: "L4",
                 self.module.RUNTIME_CAP_ENV: "30",
                 self.module.IDEMPOTENCY_ENV: "modal-smoke-v1",
@@ -255,10 +255,33 @@ class ModalJobAdapterTests(unittest.TestCase):
         source.write_text("different private bytes", encoding="utf-8")
         self.assertEqual(b"safe", plan["input_files"][0][0])
         link = self.workspace / "link.txt"
-        link.symlink_to(source)
+        try:
+            link.symlink_to(source)
+        except OSError:
+            self.skipTest("this Windows account cannot create a test symlink")
         value["inputs"] = [{"name": "source", "path": "link.txt"}]
-        with self.assertRaisesRegex(self.module.AdapterError, "unavailable"):
+        with self.assertRaises(self.module.AdapterError):
             self.module.run_job(value, execute=False)
+
+    @unittest.skipUnless(os.name == "nt", "Windows handle regression")
+    def test_windows_final_handle_path_cannot_escape_workspace(self):
+        source = self.workspace / "input.txt"
+        source.write_bytes(b"safe")
+        outside = Path(self.tmp.name) / "outside.txt"
+        outside.write_bytes(b"outside")
+        relative = self.module.PurePosixPath("input.txt")
+        original = self.module._windows_final_path
+        calls = 0
+
+        def final_path(handle):
+            nonlocal calls
+            calls += 1
+            return original(handle) if calls == 1 else outside
+
+        with mock.patch.object(self.module, "_windows_final_path", side_effect=final_path), self.assertRaisesRegex(
+            self.module.AdapterError, "escaped"
+        ):
+            self.module._read_input_windows(self.workspace, relative, 1024)
 
     def test_cumulative_input_limit_is_enforced_before_second_file_is_read(self):
         (self.workspace / "first.bin").write_bytes(b"aa")

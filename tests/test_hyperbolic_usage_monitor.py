@@ -57,6 +57,14 @@ class FakeClient:
 class HyperbolicUsageMonitorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_module()
+        self.acl = None
+        if os.name == "nt":
+            self.acl = mock.patch.object(self.module, "_windows_acl_private", return_value=True)
+            self.acl.start()
+
+    def tearDown(self) -> None:
+        if self.acl is not None:
+            self.acl.stop()
 
     def test_collect_emits_canonical_meter_and_cost(self) -> None:
         client = FakeClient(self.module)
@@ -97,6 +105,8 @@ class HyperbolicUsageMonitorTests(unittest.TestCase):
             path.write_text("HYPERBOLIC_API_KEY=sk_live_" + "a" * 32 + "\n", encoding="utf-8")
             path.chmod(stat.S_IRUSR | stat.S_IWUSR)
             self.assertTrue(self.module._read_api_key(path).startswith("sk_live_"))
+            if os.name == "nt":
+                return
             path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)
             with self.assertRaisesRegex(self.module.MonitorError, "mode 600"):
                 self.module._read_api_key(path)

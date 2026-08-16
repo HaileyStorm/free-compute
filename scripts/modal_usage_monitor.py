@@ -16,10 +16,11 @@ import re
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 CLI_ENV = "FREE_COMPUTE_MODAL_CLI"
 EXPECTED_ACCOUNT_ENV = "FREE_COMPUTE_MODAL_EXPECTED_ACCOUNT_SHA256"
@@ -49,16 +50,72 @@ class MonitorError(RuntimeError):
     """A safe-to-print, fail-closed monitor error."""
 
 
+def _windows_acl_private(
+    path: Path,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> bool:
+    powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if not powershell.is_file():
+        return False
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$acl = Get-Acl -LiteralPath $env:FREE_COMPUTE_ACL_CHECK_PATH
+$current = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$allowed = @($current, 'S-1-5-18', 'S-1-5-32-544')
+$owner = $acl.Owner
+try { $owner = ([Security.Principal.NTAccount]$owner).Translate([Security.Principal.SecurityIdentifier]).Value } catch {}
+$unsafe = 0
+foreach ($rule in $acl.Access) {
+    if ($rule.AccessControlType -ne 'Allow') { continue }
+    try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { $unsafe++; continue }
+    if ($allowed -notcontains $sid) { $unsafe++ }
+}
+[pscustomobject]@{ owner = $owner; current = $current; unsafe = $unsafe; protected = $acl.AreAccessRulesProtected } | ConvertTo-Json -Compress
+"""
+    environment = os.environ.copy()
+    environment["FREE_COMPUTE_ACL_CHECK_PATH"] = str(path)
+    try:
+        completed = runner(
+            [str(powershell), "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            shell=False,
+            timeout=15,
+            check=False,
+            env=environment,
+        )
+        payload = json.loads(completed.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return False
+    return bool(
+        completed.returncode == 0
+        and isinstance(payload, dict)
+        and payload.get("owner") == payload.get("current")
+        and payload.get("unsafe") == 0
+        and payload.get("protected") is True
+    )
+
+
 def _protected_json(path: Path) -> dict[str, Any]:
     descriptor: int | None = None
     try:
+        path_metadata = os.lstat(path)
+        if os.name == "nt" and getattr(path_metadata, "st_file_attributes", 0) & 0x00000400:
+            raise MonitorError("Modal attestation must not be a reparse point")
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
         metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
+        if not stat.S_ISREG(metadata.st_mode):
             raise MonitorError("Modal attestation must be a user-owned regular file")
-        if stat.S_IMODE(metadata.st_mode) != 0o600:
-            raise MonitorError("Modal attestation must have mode 600")
+        if os.name == "nt":
+            if not _windows_acl_private(path):
+                raise MonitorError("Modal attestation must have a private Windows ACL")
+        else:
+            if metadata.st_uid != os.getuid():
+                raise MonitorError("Modal attestation must be a user-owned regular file")
+            if stat.S_IMODE(metadata.st_mode) != 0o600:
+                raise MonitorError("Modal attestation must have mode 600")
         with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
             descriptor = None
             value = json.load(handle)

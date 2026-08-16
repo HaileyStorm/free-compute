@@ -237,8 +237,9 @@ export XDG_CONFIG_HOME="$temp_dir/config"
 ./scripts/install_linux_user_service.sh >/dev/null
 unit="$XDG_CONFIG_HOME/systemd/user/free-compute.service"
 root_dir="$(cd -- scripts/.. && pwd -P)"
+systemd_root="${root_dir// /\\\\x20}"
 grep -Fqx -- "# free-compute-checkout: $root_dir" "$unit"
-grep -Fqx -- "WorkingDirectory=$root_dir" "$unit"
+grep -Fqx -- "WorkingDirectory=$systemd_root" "$unit"
 grep -Fqx -- "EnvironmentFile=-$XDG_CONFIG_HOME/free-compute/service.env" "$unit"
 printf '%s\n' '# free-compute-checkout: another-checkout' > "$unit"
 if ./scripts/install_linux_user_service.sh >/dev/null 2>&1; then exit 71; fi

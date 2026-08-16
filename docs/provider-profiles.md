@@ -123,11 +123,16 @@ must be side-effect-free or overwrite-idempotent even with retries disabled.
 
 `scripts/modal_usage_monitor.py` makes four read-only CLI calls: token identity
 before and after current-cycle billing summary plus App inventory. It binds those
-results to an opaque expected-account SHA-256 plus a mode-`600`, user-owned,
-same-day safety attestation. The attestation records the Starter plan's
+results to an opaque expected-account SHA-256 plus a protected, user-owned,
+same-day safety attestation (`0600` on POSIX). The attestation records the Starter plan's
 included compute, a workspace hard limit no higher than that allowance, no
 payment method, paid fallback disabled, and the provider's stop-at-limit
 behavior. Identity values and credentials are never returned by the monitor.
+On Windows, the equivalent attestation requirement is a regular, non-reparse
+file with inheritance disabled and an allow-list containing only the current
+user, SYSTEM, and Administrators. Windows input staging opens both the workspace
+and each declared file by handle, rejects reparse points, and verifies the final
+handle path remains inside the workspace before reading an immutable snapshot.
 
 The local service process supplies these host-local values:
 

@@ -30,6 +30,10 @@ def load_module():
 class ModalUsageMonitorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_module()
+        self.acl = None
+        if os.name == "nt":
+            self.acl = mock.patch.object(self.module, "_windows_acl_private", return_value=True)
+            self.acl.start()
         self.identity_text = (
             "Token: opaque-token-id\n"
             "Workspace: safe-workspace (ws-opaque)\n"
@@ -38,6 +42,10 @@ class ModalUsageMonitorTests(unittest.TestCase):
         self.expected = hashlib.sha256(
             "safe-workspace\0ws-opaque\0safe-user\0us-opaque".encode()
         ).hexdigest()
+
+    def tearDown(self) -> None:
+        if self.acl is not None:
+            self.acl.stop()
 
     def attestation(self, path: Path, **updates) -> None:
         value = {
@@ -157,6 +165,7 @@ class ModalUsageMonitorTests(unittest.TestCase):
                     runner=runner,
                 )
 
+    @unittest.skipIf(os.name == "nt", "POSIX mode regression")
     def test_attestation_requires_exact_private_file_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "modal-safety.json"
@@ -175,7 +184,7 @@ class ModalUsageMonitorTests(unittest.TestCase):
             with mock.patch.dict(
                 os.environ,
                 {
-                    self.module.CLI_ENV: "/bin/true",
+                    self.module.CLI_ENV: sys.executable,
                     self.module.EXPECTED_ACCOUNT_ENV: self.expected,
                     self.module.ATTESTATION_ENV: str(path),
                     self.module.PROFILE_ENV: "free-compute",
@@ -195,7 +204,7 @@ class ModalUsageMonitorTests(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {
-                self.module.CLI_ENV: "/bin/true",
+                self.module.CLI_ENV: sys.executable,
                 self.module.EXPECTED_ACCOUNT_ENV: self.expected,
                 self.module.ATTESTATION_ENV: "relative-safety.json",
                 self.module.PROFILE_ENV: "free-compute",
@@ -204,6 +213,41 @@ class ModalUsageMonitorTests(unittest.TestCase):
         ), mock.patch.object(self.module.sys, "stderr", stderr):
             self.assertEqual(2, self.module.main())
         self.assertIn("incomplete", stderr.getvalue())
+
+    @unittest.skipUnless(os.name == "nt", "Windows ACL regression")
+    def test_windows_attestation_requires_owner_only_protected_acl(self) -> None:
+        assert self.acl is not None
+        self.acl.stop()
+        self.acl = None
+        safe = subprocess.CompletedProcess(
+            ["powershell"],
+            0,
+            stdout=json.dumps(
+                {
+                    "owner": "S-1-5-21-1",
+                    "current": "S-1-5-21-1",
+                    "unsafe": 0,
+                    "protected": True,
+                }
+            ),
+            stderr="",
+        )
+        unsafe = subprocess.CompletedProcess(
+            ["powershell"],
+            0,
+            stdout=json.dumps(
+                {
+                    "owner": "S-1-5-21-1",
+                    "current": "S-1-5-21-1",
+                    "unsafe": 1,
+                    "protected": True,
+                }
+            ),
+            stderr="",
+        )
+        with mock.patch.object(Path, "is_file", return_value=True):
+            self.assertTrue(self.module._windows_acl_private(Path("C:/safe.json"), runner=lambda *_args, **_kwargs: safe))
+            self.assertFalse(self.module._windows_acl_private(Path("C:/safe.json"), runner=lambda *_args, **_kwargs: unsafe))
 
 
 if __name__ == "__main__":

@@ -22,6 +22,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+if os.name == "nt":
+    from modal_usage_monitor import _windows_acl_private
+
 API_ROOT = "https://api.hyperbolic.xyz"
 API_KEY_FILE_ENV = "FREE_COMPUTE_HYPERBOLIC_API_KEY_FILE"
 EXPECTED_ACCOUNT_ENV = "FREE_COMPUTE_HYPERBOLIC_EXPECTED_ACCOUNT_SHA256"
@@ -81,17 +88,28 @@ def _canonical_json(value: Mapping[str, object]) -> str:
 def _read_api_key(path: Path) -> str:
     descriptor: int | None = None
     try:
+        path_metadata = os.lstat(path)
+        if os.name == "nt" and getattr(path_metadata, "st_file_attributes", 0) & 0x00000400:
+            raise MonitorError("Hyperbolic API key file must not be a reparse point")
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
         metadata = os.fstat(descriptor)
     except OSError as exc:
         raise MonitorError("Hyperbolic API key file is unavailable") from exc
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
+    if not stat.S_ISREG(metadata.st_mode):
         os.close(descriptor)
         raise MonitorError("Hyperbolic API key file must be a user-owned regular file")
-    if stat.S_IMODE(metadata.st_mode) != 0o600:
-        os.close(descriptor)
-        raise MonitorError("Hyperbolic API key file must have mode 600")
+    if os.name == "nt":
+        if not _windows_acl_private(path):
+            os.close(descriptor)
+            raise MonitorError("Hyperbolic API key file must have a private Windows ACL")
+    else:
+        if metadata.st_uid != os.getuid():
+            os.close(descriptor)
+            raise MonitorError("Hyperbolic API key file must be user-owned")
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            os.close(descriptor)
+            raise MonitorError("Hyperbolic API key file must have mode 600")
     try:
         with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
             descriptor = None

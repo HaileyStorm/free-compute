@@ -17,8 +17,14 @@ import re
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable
+from typing import Any
+
+if os.name == "nt":
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -119,7 +125,141 @@ def _relative_path(value: Any, name: str) -> PurePosixPath:
     return path
 
 
+if os.name == "nt":
+    class _WindowsFileInfo(ctypes.Structure):
+        _fields_ = [
+            ("attributes", wintypes.DWORD),
+            ("created", wintypes.FILETIME),
+            ("accessed", wintypes.FILETIME),
+            ("written", wintypes.FILETIME),
+            ("volume_serial", wintypes.DWORD),
+            ("size_high", wintypes.DWORD),
+            ("size_low", wintypes.DWORD),
+            ("links", wintypes.DWORD),
+            ("file_index_high", wintypes.DWORD),
+            ("file_index_low", wintypes.DWORD),
+        ]
+
+
+def _windows_handle(path: Path, *, directory: bool) -> int:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+    flags = 0x02000000 if directory else 0x00200000 | 0x08000000
+    access = 0 if directory else 0x80000000
+    share = 0x00000007 if directory else 0x00000001
+    handle = create_file(str(path), access, share, None, 3, flags, None)
+    invalid = ctypes.c_void_p(-1).value
+    if handle in {None, invalid}:
+        raise AdapterError("declared input is unavailable inside the Modal workspace")
+    return int(handle)
+
+
+def _windows_final_path(handle: int) -> Path:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_path = kernel32.GetFinalPathNameByHandleW
+    get_path.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+    get_path.restype = wintypes.DWORD
+    needed = get_path(handle, None, 0, 0)
+    if not needed or needed > 32768:
+        raise AdapterError("declared input path could not be verified")
+    buffer = ctypes.create_unicode_buffer(needed + 1)
+    written = get_path(handle, buffer, len(buffer), 0)
+    if not written or written >= len(buffer):
+        raise AdapterError("declared input path could not be verified")
+    value = buffer.value
+    if value.startswith("\\\\?\\UNC\\"):
+        value = "\\\\" + value[8:]
+    elif value.startswith("\\\\?\\"):
+        value = value[4:]
+    return Path(value)
+
+
+def _windows_file_info(handle: int) -> _WindowsFileInfo:
+    info = _WindowsFileInfo()
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_info = kernel32.GetFileInformationByHandle
+    get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(_WindowsFileInfo)]
+    get_info.restype = wintypes.BOOL
+    if not get_info(handle, ctypes.byref(info)):
+        raise AdapterError("declared input metadata could not be verified")
+    return info
+
+
+def _windows_close(handle: int) -> None:
+    close_handle = ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+    close_handle(handle)
+
+
+def _read_input_windows(workspace: Path, relative: PurePosixPath, max_bytes: int) -> bytes:
+    workspace_handle = _windows_handle(workspace, directory=True)
+    file_handle: int | None = None
+    descriptor: int | None = None
+    try:
+        workspace_final = _windows_final_path(workspace_handle)
+        candidate = workspace.joinpath(*relative.parts)
+        file_handle = _windows_handle(candidate, directory=False)
+        file_final = _windows_final_path(file_handle)
+        try:
+            inside = os.path.commonpath([str(workspace_final), str(file_final)])
+        except ValueError as exc:
+            raise AdapterError("declared input escaped the Modal workspace") from exc
+        if os.path.normcase(inside) != os.path.normcase(str(workspace_final)):
+            raise AdapterError("declared input escaped the Modal workspace")
+        info = _windows_file_info(file_handle)
+        if info.attributes & 0x00000400 or info.attributes & 0x00000010:
+            raise AdapterError("declared inputs must be non-reparse regular files")
+        size = (int(info.size_high) << 32) | int(info.size_low)
+        if size > max_bytes:
+            raise AdapterError("declared inputs exceed the Modal byte limit")
+        descriptor = msvcrt.open_osfhandle(file_handle, os.O_RDONLY | os.O_BINARY)
+        file_handle = None
+        before = os.fstat(descriptor)
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(1024 * 1024, max_bytes + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > max_bytes:
+                raise AdapterError("declared inputs exceed the Modal byte limit")
+        after = os.fstat(descriptor)
+        if (
+            total != size
+            or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ino != after.st_ino
+        ):
+            raise AdapterError("declared input changed while it was read")
+        return b"".join(chunks)
+    except AdapterError:
+        raise
+    except OSError as exc:
+        raise AdapterError("declared input is unavailable inside the Modal workspace") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if file_handle is not None:
+            _windows_close(file_handle)
+        _windows_close(workspace_handle)
+
+
 def _read_input(workspace: Path, relative: PurePosixPath, max_bytes: int) -> bytes:
+    if os.name == "nt":
+        return _read_input_windows(workspace, relative, max_bytes)
     descriptor = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
     try:
         for part in relative.parts[:-1]:

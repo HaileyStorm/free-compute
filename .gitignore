@@ -12,3 +12,4 @@ orchestrator/state/
 
 # Active-work ownership marker is never part of the public repository.
 .working
+.working.*

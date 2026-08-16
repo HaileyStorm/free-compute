@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
@@ -30,6 +31,7 @@ from orchestrator import (
     public_profile_summary,
     serve,
     validate_job,
+    _observed_date,
 )
 
 
@@ -161,6 +163,23 @@ def dispatch_job(key, profile="command"):
 
 
 class OrchestratorTests(unittest.TestCase):
+    @unittest.skipUnless(hasattr(time, "tzset"), "requires POSIX timezone control")
+    def test_timestamp_freshness_uses_the_local_calendar_date(self):
+        previous_tz = os.environ.get("TZ")
+        try:
+            os.environ["TZ"] = "America/Denver"
+            time.tzset()
+            self.assertEqual(
+                datetime(2026, 8, 15).date(),
+                _observed_date("2026-08-16T04:00:00Z"),
+            )
+        finally:
+            if previous_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = previous_tz
+            time.tzset()
+
     def test_valid_job_plans_deterministically(self):
         first = plan_job(fixture_job(), fixture_catalog(), {})
         second = plan_job(fixture_job(), fixture_catalog(), {})

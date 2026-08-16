@@ -85,3 +85,25 @@ Manually verify the provider's SSH host fingerprint through an independent trust
 Run it without `FREE_COMPUTE_SSH_EXECUTE=1` first; that validates the bounded job and returns `dry_run` without an SSH connection. Enable that environment value only after the account has current zero-liability, ownership, arm, and meter evidence. The adapter has a default four-hour runtime cap, refuses jobs above its configured cap, refuses paths outside the declared workspace, disallows symlinked inputs, caps staged inputs at 5 GiB, and caps collected outputs cumulatively at 5 GiB in a fresh per-job directory. A provider-contact or output-collection failure can be `ambiguous`; reconcile the remote host and meter, then do not retry automatically.
 
 For an existing provider VM, keep provider-issued SSH details in the Linux user's SSH configuration or protected environment, not in this repository or the profile. The generic adapter must not alter an externally managed VM; use `manual` until a deliberately authorized instance has passed this safety flow. Current Hyperbolic inspection confirms H200 SXM5 141 GB-class VM SSH access is possible through provider-issued details, but that does not itself create routing authority.
+
+### Experimental Hyperbolic existing-VM monitor
+
+`scripts/hyperbolic_usage_monitor.py` is a read-only meter for an existing
+Hyperbolic prepaid-credit account. It reads the protected key-file path from
+`FREE_COMPUTE_HYPERBOLIC_API_KEY_FILE` and an opaque expected account digest
+from `FREE_COMPUTE_HYPERBOLIC_EXPECTED_ACCOUNT_SHA256`. The key file must be a
+mode-`600`, user-owned regular file containing exactly one
+`HYPERBOLIC_API_KEY=...` entry. The script returns only canonical balance,
+active-job, and active-cost fields. It fails closed on account drift, inactive
+accounts, auto-top-up, persistent storage, bare-metal rentals, unreadable
+costs, redirects, or response-schema drift.
+
+This monitor does not launch, change, or terminate a rental. The example
+`hyperbolic-existing-vm` profile composes it with the generic SSH adapter and
+therefore remains disabled by default. Before enabling that local profile,
+verify a current prepaid balance, disabled auto-top-up, zero paid fallback,
+the exact one-VM rate, an independently pinned SSH host key, and a separate
+execute-capable watchdog bound to the exact rental with a protected reserve,
+maximum debit, hard runtime, and termination-confirmation margin. The current
+Hyperbolic marketplace API is not a stable public provisioning contract, so
+provider creation stays outside Free Compute's automatic dispatch path.

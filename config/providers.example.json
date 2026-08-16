@@ -98,6 +98,23 @@
         }
       },
       "instructions": "The monitor must return the canonical usage snapshot; only the environment variable name is stored."
+    },
+    {
+      "id": "hyperbolic-existing-vm",
+      "adapter": "command",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "acct-hyperbolic",
+      "command": ["python3", "scripts/ssh_job_adapter.py"],
+      "auth": {"mode": "none"},
+      "usage_monitor": {
+        "enabled": false,
+        "adapter": "command_json",
+        "command": ["python3", "scripts/hyperbolic_usage_monitor.py"],
+        "poll_interval_seconds": 60,
+        "timeout_seconds": 30
+      },
+      "instructions": "Experimental existing-VM route only. Configure protected Hyperbolic meter and SSH environment references, independently verify the host key, start an execute-capable exact-rental watchdog, and keep this disabled until a dry run and teardown proof pass. This profile never creates or stops a provider VM."
     }
   ]
 }

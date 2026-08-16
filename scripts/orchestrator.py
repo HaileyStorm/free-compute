@@ -1325,13 +1325,9 @@ def _account_freshness_reasons(
     _balance, _unit, observed_at, source = _effective_account_balance(account, usage)
     if source in {"private_observation", "live_monitor"}:
         value = observed_at
-        try:
-            observed = date.fromisoformat(value)
-        except (TypeError, ValueError):
-            try:
-                observed = datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
-            except ValueError:
-                return [f"{source.replace('_', ' ')} date is invalid"]
+        observed = _observed_date(value)
+        if observed is None:
+            return [f"{source.replace('_', ' ')} date is invalid"]
         today = _local_today()
         if observed > today:
             return [f"{source.replace('_', ' ')} date is in the future"]
@@ -1409,9 +1405,12 @@ def _observed_date(value: Any) -> date | None:
         return date.fromisoformat(value)
     except ValueError:
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+            observed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+        if observed.tzinfo is not None:
+            observed = observed.astimezone()
+        return observed.date()
 
 
 def _live_quota_reasons(usage: dict[str, Any] | None) -> list[str]:

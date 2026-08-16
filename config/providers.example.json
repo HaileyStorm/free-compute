@@ -115,6 +115,31 @@
         "timeout_seconds": 30
       },
       "instructions": "Experimental existing-VM route only. Configure protected Hyperbolic meter and SSH environment references, independently verify the host key, start an execute-capable exact-rental watchdog, and keep this disabled until a dry run and teardown proof pass. This profile never creates or stops a provider VM."
+    },
+    {
+      "id": "modal-sandbox",
+      "adapter": "command",
+      "enabled": false,
+      "allow_dispatch": false,
+      "account_id": "acct-modal",
+      "command": [
+        "python3",
+        "scripts/modal_job_adapter.py"
+      ],
+      "auth": {
+        "mode": "none"
+      },
+      "usage_monitor": {
+        "enabled": false,
+        "adapter": "command_json",
+        "command": [
+          "python3",
+          "scripts/modal_usage_monitor.py"
+        ],
+        "poll_interval_seconds": 60,
+        "timeout_seconds": 30
+      },
+      "instructions": "Experimental one-shot route only. Configure the protected exact-account identity and same-day no-payment/hard-limit attestation, pin modal==1.5.4, dry-run first, and keep disabled until live meter and teardown proof pass."
     }
   ]
 }

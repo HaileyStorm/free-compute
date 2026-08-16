@@ -107,3 +107,45 @@ execute-capable watchdog bound to the exact rental with a protected reserve,
 maximum debit, hard runtime, and termination-confirmation margin. The current
 Hyperbolic marketplace API is not a stable public provisioning contract, so
 provider creation stays outside Free Compute's automatic dispatch path.
+
+## Experimental Modal Sandbox route
+
+`scripts/modal_job_adapter.py` runs one portable `command` or `python` job in a
+single ephemeral, non-detached Modal Sandbox. It pins `modal==1.5.4`, uses one
+reviewed GPU (`T4`, `L4`, or `A10G`), blocks outbound network access, accepts
+only declared regular-file inputs (not directories or symlinks), rejects
+persistent-storage and checkpoint requirements, bounds runtime and staged
+bytes, and verifies the exact App is stopped. Provider-contact uncertainty is
+reported as `ambiguous` and must never be retried automatically.
+Execution also requires the portable job's idempotency key to match the key
+injected by the orchestrator. Because Modal may restart a preempted input, jobs
+must be side-effect-free or overwrite-idempotent even with retries disabled.
+
+`scripts/modal_usage_monitor.py` makes four read-only CLI calls: token identity
+before and after current-cycle billing summary plus App inventory. It binds those
+results to an opaque expected-account SHA-256 plus a mode-`600`, user-owned,
+same-day safety attestation. The attestation records the Starter plan's
+included compute, a workspace hard limit no higher than that allowance, no
+payment method, paid fallback disabled, and the provider's stop-at-limit
+behavior. Identity values and credentials are never returned by the monitor.
+
+The local service process supplies these host-local values:
+
+| Variable | Requirement |
+| --- | --- |
+| `FREE_COMPUTE_MODAL_CLI` | Absolute executable path to the pinned Modal CLI. |
+| `MODAL_PROFILE` | Required fixed Modal profile name so service calls cannot follow a later active-profile switch. |
+| `FREE_COMPUTE_MODAL_EXPECTED_ACCOUNT_SHA256` | Opaque digest of the exact authenticated workspace and user. |
+| `FREE_COMPUTE_MODAL_SAFETY_ATTESTATION_FILE` | Absolute path to the protected same-day attestation. |
+| `FREE_COMPUTE_MODAL_WORKSPACE` | Existing absolute local root for declared inputs. |
+| `FREE_COMPUTE_MODAL_COLLECT_DIR` | Existing absolute collection root, required only when outputs are declared. |
+| `FREE_COMPUTE_MODAL_GPU` | Reviewed fixed GPU; defaults to `L4`. |
+| `FREE_COMPUTE_MODAL_MAX_RUNTIME_CAP_MINUTES` | Local cap from `1` to `60`; defaults to `30`. |
+| `FREE_COMPUTE_MODAL_EXECUTE` | Leave unset for dry-run; set exactly to `1` only in the armed service process. |
+
+Keep the example profile disabled. A local operator may enable it only after
+the exact account has a current private catalog observation, the monitor shows
+positive included compute and zero unknown activity, the adapter dry-run
+passes, and a bounded live smoke confirms both App teardown and post-run
+billing reconciliation. Reverify the safety attestation daily; any plan,
+budget, payment, identity, CLI schema, or App-state drift fails closed.

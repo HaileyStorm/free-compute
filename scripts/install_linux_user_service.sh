@@ -32,6 +32,21 @@ systemd_quote() {
   printf '"%s"' "${value}"
 }
 
+systemd_path() {
+  local value="$1"
+  if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
+    printf '%s\n' 'Refusing a path containing a line break.' >&2
+    return 2
+  fi
+  value="${value//\\/\\x5c}"
+  value="${value//\%/%%}"
+  value="${value// /\\x20}"
+  value="${value//$'\t'/\\x09}"
+  value="${value//\"/\\x22}"
+  value="${value//\'/\\x27}"
+  printf '%s' "${value}"
+}
+
 if [[ -L "${unit_path}" ]]; then
   printf 'Refusing to replace symlinked unit: %s\n' "${unit_path}" >&2
   exit 2
@@ -51,10 +66,10 @@ trap 'rm -f -- "${temp_path}"' EXIT
   printf '%s\n' 'After=network-online.target'
   printf '%s\n\n' 'Wants=network-online.target'
   printf '%s\n' '[Service]'
-  printf 'WorkingDirectory=%s\n' "$(systemd_quote "${root_dir}")"
+  printf 'WorkingDirectory=%s\n' "$(systemd_path "${root_dir}")"
   printf '%s\n' 'Environment=PYTHONUNBUFFERED=1'
   printf '%s\n' 'Environment=FREE_COMPUTE_HOST=127.0.0.1'
-  printf 'EnvironmentFile=-%s\n' "$(systemd_quote "${environment_path}")"
+  printf 'EnvironmentFile=-%s\n' "$(systemd_path "${environment_path}")"
   printf 'ExecStart=%s %s %s\n' "$(systemd_quote /usr/bin/env)" "$(systemd_quote bash)" "$(systemd_quote "${script_dir}/linux_start.sh")"
   printf '%s\n' 'Restart=on-failure'
   printf '%s\n\n' 'RestartSec=3'

@@ -1577,6 +1577,16 @@ class OrchestratorTests(unittest.TestCase):
             self.assertFalse(state.arm_view()["armed"])
             self.assertEqual(1, state.clear_credential({"credential_ref": result["credential_ref"]})["cleared"])
 
+    def test_auth_none_profile_is_connected_without_a_session_slot(self):
+        catalog = fixture_catalog()
+        catalog["accounts"][0].update({"balance": 1, "balance_unit": "credits"})
+        profile = command_profile()
+        state = OrchestratorState(catalog, {profile["id"]: profile})
+        readiness = state.onboarding_view()["readiness"][0]
+        self.assertEqual(["none"], readiness["allowed_methods"])
+        self.assertTrue(readiness["connected"])
+        self.assertTrue(readiness["routable_now"])
+
     def test_missing_environment_reference_is_never_connected_or_routable(self):
         catalog = fixture_catalog()
         catalog["accounts"][0].update({"balance": 1, "balance_unit": "credits"})

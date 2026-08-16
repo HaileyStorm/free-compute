@@ -2135,12 +2135,14 @@ class OrchestratorState:
         return None
 
     def _connection_is_available(self, profile_id: str, profile: dict[str, Any]) -> bool:
+        auth = profile.get("auth")
+        if isinstance(auth, dict) and auth.get("mode", "none") == "none":
+            return True
         slot = self._profile_connection(profile_id)
         if slot is None:
             return False
         if slot.get("method") != "env_ref":
             return True
-        auth = profile.get("auth")
         key_env = auth.get("key_env") if isinstance(auth, dict) else None
         return isinstance(key_env, str) and bool(os.environ.get(key_env))
 

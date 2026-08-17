@@ -48,6 +48,24 @@ An eligible existing Prime membership includes Luna Standard's evolving cloud-st
 
 ## Excluded or empty account-credit records
 
+### Vast.ai
+
+The Threadspan-created account was observed on 2026-08-17 with zero credit and
+no payment method. It contributes no acquired USD or H100e and remains
+unarmable. Free Compute identifies it only as `acct-vast`; each owner-selected
+machine separately binds the authenticated provider user ID through an opaque
+SHA-256 environment reference. API keys, provider user IDs, and email addresses
+remain machine-local. See Vast.ai's official [current-user API](https://docs.vast.ai/api-reference/accounts/show-user),
+[instance-list API](https://docs.vast.ai/api-reference/instances/show-instances),
+and [CLI authentication guide](https://docs.vast.ai/cli/authentication).
+
+The read-only meter records the current credit balance and, only where the API
+state is complete enough, active-job count and hourly spend. Stopped rentals
+retain disk charges, and transient or unknown statuses do not prove zero spend;
+missing or ambiguous fields therefore remain unknown. Do not add funds, enable
+autobilling, add a payment method, transfer credit, or launch a rental through
+Free Compute merely because the meter succeeds.
+
 ### Lambda Cloud
 
 The remaining service credit is excluded because paid fallback can charge a saved payment method after credit exhaustion or expiry. A budget alert is not a provider-enforced hard stop. A read-only check on 2026-08-11 confirmed an externally launched H100 PCIe workload was already running; Free Compute records its observed usage but must not stop, modify, or launch alongside it. Keep this route out of the armable pool. See [Lambda instances](https://lambda.ai/instances).

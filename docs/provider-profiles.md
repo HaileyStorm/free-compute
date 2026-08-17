@@ -108,6 +108,58 @@ maximum debit, hard runtime, and termination-confirmation margin. The current
 Hyperbolic marketplace API is not a stable public provisioning contract, so
 provider creation stays outside Free Compute's automatic dispatch path.
 
+### Vast.ai read-only account meter
+
+`scripts/vast_usage_monitor.py` is a portable standard-library monitor for the
+official Vast.ai REST API. It makes only authenticated `GET` requests to the
+current-user and paginated instance-list endpoints. The instance query selects
+only `id`, `actual_status`, and `dph_total`; the monitor never retrieves an
+email for output and never creates, starts, stops, destroys, transfers, or
+changes a rental or billing setting.
+
+The public catalog uses only `acct-vast`. Bind that record to the exact Vast.ai
+account on each machine by setting
+`FREE_COMPUTE_VAST_EXPECTED_ACCOUNT_SHA256` to SHA-256 of the provider's
+numeric/string user `id`. The raw provider ID and email remain machine-local.
+The Threadspan-created account is linked in this way: Threadspan contributes
+the account provenance, while Free Compute stores only `acct-vast` and compares
+the machine-local digest at every read.
+
+Supply exactly one key source:
+
+| Variable | Requirement |
+| --- | --- |
+| `VAST_API_KEY` | Preferred process-local API key environment variable. |
+| `FREE_COMPUTE_VAST_API_KEY_ENV` | Optional name of an owner-selected environment variable instead of `VAST_API_KEY`. |
+| `FREE_COMPUTE_VAST_API_KEY_FILE` | POSIX-only absolute path to a one-line raw key or `VAST_API_KEY=...` file; it must be owner-only mode `600`. Windows rejects file references because the standard-library monitor cannot prove an ACL/reparse-point boundary; use an environment reference there. |
+| `FREE_COMPUTE_VAST_EXPECTED_ACCOUNT_SHA256` | Required lowercase SHA-256 of the authenticated Vast user ID. It is opaque binding material, not a credential. |
+
+The official CLI can calculate the opaque binding without printing the email:
+
+```bash
+vastai show user --raw | python3 -c 'import hashlib,json,sys; print(hashlib.sha256(str(json.load(sys.stdin)["id"]).encode()).hexdigest())'
+```
+
+```powershell
+vastai show user --raw | py -3 -c "import hashlib,json,sys; print(hashlib.sha256(str(json.load(sys.stdin)['id']).encode()).hexdigest())"
+```
+
+The ignored local profile file contains two disabled examples:
+`vast-read-only-linux` uses `python3`, and
+`vast-read-only-windows-template` uses the Windows `py -3` launcher. Merge the
+applicable profile into each host's existing local file; never replace that
+file. Leave profile dispatch disabled. Enable only its `usage_monitor` after a
+direct script run verifies the expected account and redacted output.
+
+The monitor always emits the canonical current-credit meter. It reports active
+job count only when every returned instance has a stable documented status. It
+reports hourly spend only for an empty inventory (known zero) or when every
+instance is `running`/`frozen` with a finite `dph_total`. Stopped instances keep
+disk charges, and transient/unknown states are ambiguous, so those rates remain
+unknown rather than being converted to zero. The orchestrator adds
+`source: monitor`, `observed_at`, and `next_poll_at` to each accepted bounded
+observation.
+
 ## Experimental Modal Sandbox route
 
 `scripts/modal_job_adapter.py` runs one portable `command` or `python` job in a

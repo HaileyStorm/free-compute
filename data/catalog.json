@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "as_of": "2026-08-12",
+  "as_of": "2026-08-17",
   "safe_balance_snapshot_as_of": "2026-08-11",
-  "research_retrieved_as_of": "2026-08-12",
-  "usage_observed_as_of": "2026-08-12",
+  "research_retrieved_as_of": "2026-08-17",
+  "usage_observed_as_of": "2026-08-17",
   "owner": {
     "identity": "redacted",
     "app_scope": "Legitimate free compute only"
@@ -105,6 +105,21 @@
       "safe_accounts": 6,
       "accounts_acquired_this_project": 2,
       "notes": "The account owner confirmed that a Lambda node is actively spending credits. Exact current balance, runtime, and cost remain unknown pending a fresh read-only meter observation; no safely acquired totals were changed. Hyperbolic use was planned for later today but is not recorded as active without observation."
+    },
+    {
+      "observed_on": "2026-08-17",
+      "event": "vast_account_linked",
+      "acquired_h100e_available": 50.43,
+      "acquired_usd_value": 165.91,
+      "confirmed_offer_h100e_potential": 44.39,
+      "discovered_h100e_potential": 64123.72,
+      "used_h100e_since_tracking": 6.43,
+      "used_h100e_external": 6.43,
+      "used_h100e_safe_acquired": 0,
+      "cataloged_offers": 52,
+      "safe_accounts": 6,
+      "accounts_acquired_this_project": 2,
+      "notes": "Linked the new Threadspan Vast.ai account through the opaque public ID acct-vast after a provider-native Billing observation showed zero credit and no payment method. No email, provider user ID, credential, safe acquired value, or H100e total was added."
     }
   ],
   "normalization": {
@@ -221,6 +236,77 @@
       "docs": "docs/provider-usage.md#hyperbolic",
       "evidence": "Live Billing and GPU inventory verified 2026-08-11: $111.17 balance, $0.00/hour active cost, zero active GPUs, and auto top-up disabled. H100 SXM inventory was available from $3.19/GPU-hour.",
       "next_action": "Use for ML GPU workloads; keep auto top-up disabled and verify $0 active cost after every run."
+    },
+    {
+      "id": "acct-vast",
+      "provider": "Vast.ai",
+      "account": "Threadspan-linked account (redacted)",
+      "status": "empty",
+      "balance": 0,
+      "balance_unit": "USD credit",
+      "balance_as_of": "2026-08-17",
+      "payment_state": "no_payment_method",
+      "hard_stop": true,
+      "paid_fallback_allowed": false,
+      "acquired_safe": false,
+      "acquisition_origin": "found_this_project",
+      "recurrence": "one_time",
+      "usage": {
+        "used": null,
+        "available": 0,
+        "unit": "USD credit",
+        "period": "current_balance",
+        "observed_on": "2026-08-17"
+      },
+      "hardware": {
+        "gpu_models": [
+          "Marketplace GPUs; exact available hardware is unverified"
+        ],
+        "best_gpu": "Unverified",
+        "memory_per_unit_gb_min": null,
+        "memory_per_unit_gb_max": null,
+        "unit_count_max": null,
+        "compute_class": "unknown",
+        "stack": [
+          "CUDA",
+          "containers",
+          "SSH",
+          "Linux"
+        ]
+      },
+      "usability": {
+        "access_mode": "gpu_marketplace_api_cli",
+        "workload_types": [
+          "python",
+          "training",
+          "inference",
+          "containers",
+          "ssh"
+        ],
+        "usable_now": false,
+        "interruptibility": "mixed",
+        "setup_friction": "empty_balance"
+      },
+      "poolability": {
+        "suitability": "conditional",
+        "mechanism": "isolated_personal",
+        "one_time_contribution": true,
+        "recurring_contribution": false,
+        "constraints": "The account is linked only by acct-vast plus a machine-local hash of the provider user ID. Its zero balance contributes no compute, and credentials remain on the owner-selected host."
+      },
+      "links": [
+        {
+          "label": "Official account API",
+          "url": "https://docs.vast.ai/api-reference/accounts/show-user"
+        },
+        {
+          "label": "Official instances API",
+          "url": "https://docs.vast.ai/api-reference/instances/show-instances"
+        }
+      ],
+      "docs": "docs/provider-usage.md#vastai",
+      "evidence": "Threadspan's provider-native OAuth reached the Vast.ai Billing page on 2026-08-17; the new account showed zero credit and no payment method. No API key was created, copied, or stored by Threadspan.",
+      "next_action": "Keep the account unarmed. On each owner-selected host, create a least-privilege read-only key, bind its provider user ID by opaque SHA-256, and run the read-only meter before treating balance or spend fields as current."
     },
     {
       "id": "acct-lambda",

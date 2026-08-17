@@ -151,6 +151,46 @@ applicable profile into each host's existing local file; never replace that
 file. Leave profile dispatch disabled. Enable only its `usage_monitor` after a
 direct script run verifies the expected account and redacted output.
 
+Linux profile object:
+
+```json
+{
+  "id": "vast-read-only-linux",
+  "adapter": "manual",
+  "enabled": false,
+  "allow_dispatch": false,
+  "account_id": "acct-vast",
+  "auth": {"mode": "none"},
+  "usage_monitor": {
+    "enabled": false,
+    "adapter": "command_json",
+    "command": ["python3", "scripts/vast_usage_monitor.py"],
+    "poll_interval_seconds": 60,
+    "timeout_seconds": 30
+  }
+}
+```
+
+Windows profile object:
+
+```json
+{
+  "id": "vast-read-only-windows-template",
+  "adapter": "manual",
+  "enabled": false,
+  "allow_dispatch": false,
+  "account_id": "acct-vast",
+  "auth": {"mode": "none"},
+  "usage_monitor": {
+    "enabled": false,
+    "adapter": "command_json",
+    "command": ["py", "-3", "scripts/vast_usage_monitor.py"],
+    "poll_interval_seconds": 60,
+    "timeout_seconds": 30
+  }
+}
+```
+
 The monitor always emits the canonical current-credit meter. It reports active
 job count only when every returned instance has a stable documented status. It
 reports hourly spend only for an empty inventory (known zero) or when every
